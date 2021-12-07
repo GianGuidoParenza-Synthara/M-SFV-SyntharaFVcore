@@ -19,6 +19,7 @@ _DEFAULT_SUPPORTED_OPS: Dict[str, Handle] = {
     "aten::einsum": generic_activation_jit(),
     "aten::matmul": generic_activation_jit(),
     "aten::linear": generic_activation_jit(),
+    "aten::lstm": generic_activation_jit("lstm")
 }
 
 

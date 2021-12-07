@@ -7,6 +7,7 @@ import typing
 from collections import Counter, OrderedDict
 from numbers import Number
 from typing import Any, Callable, List, Optional, Union
+from warnings import WarningMessage
 
 import numpy as np
 
@@ -35,6 +36,8 @@ def get_shape(val: Any) -> Optional[List[int]]:
     else:
         return None
 
+def get_values(vals: List[Any]) -> Optional[List[Any]]:
+    return [v.toIValue() for v in vals]
 
 """
 Below are flop/activation counters for various ops. Every counter has the following signature:
@@ -73,8 +76,11 @@ def generic_activation_jit(op_name: Optional[str] = None) -> Handle:
         ac_count = prod(out_shape)
         if op_name is None:
             return ac_count
-        else:
-            return Counter({op_name: ac_count})
+
+        if op_name == "lstm":
+            raise WarningMessage("LSTM Act Not Implemented") # NOTE: to finish
+
+        return Counter({op_name: ac_count})
 
     return _generic_activation_jit
 
@@ -92,8 +98,7 @@ def addmm_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
     assert len(input_shapes[1]) == 2, input_shapes[1]
     batch_size, input_dim = input_shapes[0]
     output_dim = input_shapes[1][1]
-    flops = batch_size * input_dim * output_dim
-    return flops
+    return batch_size * input_dim * output_dim
 
 
 def linear_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
@@ -102,13 +107,27 @@ def linear_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
     """
     # Inputs is a list of length 3; unlike aten::addmm, it is the first
     # two elements that are relevant.
-    input_shapes = [get_shape(v) for v in inputs[0:2]]
+    input_shapes = [get_shape(v) for v in inputs[:2]]
     # input_shapes[0]: [dim0, dim1, ..., input_feature_dim]
     # input_shapes[1]: [output_feature_dim, input_feature_dim]
     assert input_shapes[0][-1] == input_shapes[1][-1]
-    flops = prod(input_shapes[0]) * input_shapes[1][0]
-    return flops
+    return prod(input_shapes[0]) * input_shapes[1][0]
 
+
+def lstm_flop_jit(inputs: List[Any], outputs: List[Any]):
+    """
+    Count flops for the aten::lstm operator.
+    """
+    time_dim, batch_size, input_dim = get_shape(inputs[0])
+    *_, proj_size = get_shape(outputs[1])
+    *_, hidden_dim = get_shape(outputs[2])
+
+    *_, bias, lstm_layers, dropout, _, bidirectional, batch_first = get_values(inputs)
+
+    mm_flops = 4 * ((input_dim + hidden_dim) * proj_size) + (hidden_dim * proj_size if hidden_dim != proj_size else 0)
+    mul_flops = 3 * proj_size
+    
+    return (mm_flops + mul_flops) * batch_size * (2 if bidirectional else 1) * lstm_layers * time_dim
 
 def bmm_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
     """
@@ -120,8 +139,7 @@ def bmm_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
     input_shapes = [get_shape(v) for v in inputs]
     n, c, t = input_shapes[0]
     d = input_shapes[-1][-1]
-    flop = n * c * t * d
-    return flop
+    return n * c * t * d
 
 
 def conv_flop_count(
@@ -147,8 +165,7 @@ def conv_flop_count(
     """
     batch_size = x_shape[0]
     conv_shape = (x_shape if transposed else out_shape)[2:]
-    flop = batch_size * prod(w_shape) * prod(conv_shape)
-    return flop
+    return batch_size * prod(w_shape) * prod(conv_shape)
 
 
 def conv_flop_jit(inputs: List[Any], outputs: List[Any]) -> typing.Counter[str]:
@@ -160,7 +177,7 @@ def conv_flop_jit(inputs: List[Any], outputs: List[Any]) -> typing.Counter[str]:
     # 5) dilation, 6) transposed, 7) out_pad, 8) groups, 9) benchmark_cudnn,
     # 10) deterministic_cudnn and 11) user_enabled_cudnn.
     # starting with #40737 it will be 12) user_enabled_tf32
-    assert len(inputs) == 12 or len(inputs) == 13, len(inputs)
+    assert len(inputs) in [12, 13], len(inputs)
     x, w = inputs[:2]
     x_shape, w_shape, out_shape = (get_shape(x), get_shape(w), get_shape(outputs[0]))
     transposed = inputs[6].toIValue()
@@ -222,8 +239,7 @@ def matmul_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
     input_shapes = [get_shape(v) for v in inputs]
     assert len(input_shapes) == 2, input_shapes
     assert input_shapes[0][-1] == input_shapes[1][-2], input_shapes
-    flop = prod(input_shapes[0]) * input_shapes[-1][-1]
-    return flop
+    return prod(input_shapes[0]) * input_shapes[-1][-1]
 
 
 def norm_flop_counter(affine_arg_index: int) -> Handle:
@@ -241,8 +257,7 @@ def norm_flop_counter(affine_arg_index: int) -> Handle:
         has_affine = get_shape(inputs[affine_arg_index]) is not None
         assert 2 <= len(input_shape) <= 5, input_shape
         # 5 is just a rough estimate
-        flop = prod(input_shape) * (5 if has_affine else 4)
-        return flop
+        return prod(input_shape) * (5 if has_affine else 4)
 
     return norm_flop_jit
 
