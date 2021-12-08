@@ -4,7 +4,6 @@ import typing
 import unittest
 from collections import Counter, defaultdict
 from typing import Any, Dict, Tuple
-from warnings import WarningMessage
 
 import torch
 import torch.nn as nn
@@ -50,28 +49,28 @@ class ThreeNet(nn.Module):
 
 class LSTMNet(nn.Module):
     """
-    A network with a single LSTM layer. This is used for testing flop
+    A network with LSTM layers. This is used for testing flop
     count for LSTM layers.
     """
 
     def __init__(
-        self,
-        input_dim,
-        hidden_dim,
-        lstm_layers,
-        bias,
-        batch_first,
-        bidirectional,
-        proj_size
+            self,
+            input_dim,
+            hidden_dim,
+            lstm_layers,
+            bias: bool,
+            batch_first,
+            bidirectional,
+            proj_size
     ) -> None:
         super(LSTMNet, self).__init__()
         self.lstm = nn.LSTM(input_dim,
                             hidden_dim,
                             lstm_layers,
-                            bias= bias,
-                            batch_first= batch_first,
-                            bidirectional= bidirectional,
-                            proj_size= proj_size)
+                            bias=bias,
+                            batch_first=batch_first,
+                            bidirectional=bidirectional,
+                            proj_size=proj_size)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.lstm(x)
@@ -85,16 +84,16 @@ class ConvNet(nn.Module):
     """
 
     def __init__(
-        self,
-        conv_dim: int,
-        input_dim: int,
-        output_dim: int,
-        kernel_size: int,
-        stride: int,
-        padding: int,
-        groups_num: int,
-        transpose: bool = False,
-        output_padding: int = 0,
+            self,
+            conv_dim: int,
+            input_dim: int,
+            output_dim: int,
+            kernel_size: int,
+            stride: int,
+            padding: int,
+            groups_num: int,
+            transpose: bool = False,
+            output_padding: int = 0,
     ) -> None:
         super(ConvNet, self).__init__()
         if transpose:
@@ -103,7 +102,7 @@ class ConvNet(nn.Module):
         else:
             conv_layers = [nn.Conv1d, nn.Conv2d, nn.Conv3d]
             assert (
-                output_padding == 0
+                    output_padding == 0
             ), "output_padding is not supported for un-transposed convolutions."
             kwargs = {}
         convLayer = conv_layers[conv_dim - 1]
@@ -217,9 +216,10 @@ class TestFlopCountAnalysis(unittest.TestCase):
         The second case checks when a new handle for a default operation is
         passed. The new handle should overwrite the default handle.
         """
+
         # New handle for a new operation.
         def dummy_sigmoid_flop_jit(
-            inputs: typing.List[Any], outputs: typing.List[Any]
+                inputs: typing.List[Any], outputs: typing.List[Any]
         ) -> typing.Counter[str]:
             """
             A dummy handle function for sigmoid. Note the handle here does
@@ -246,7 +246,7 @@ class TestFlopCountAnalysis(unittest.TestCase):
         # New handle that overwrites a default handle addmm. So now the new
         # handle counts flops for the fully connected layer.
         def addmm_dummy_flop_jit(
-            inputs: typing.List[object], outputs: typing.List[object]
+                inputs: typing.List[object], outputs: typing.List[object]
         ) -> typing.Counter[str]:
             """
             A dummy handle function for fully connected layers. This overwrites
@@ -340,21 +340,53 @@ class TestFlopCountAnalysis(unittest.TestCase):
 
     def test_lstm(self) -> None:
         """
-        Test a network with a single fully connected layer.
+        Test if the flop count of a network with one LSTM layer equals the
+        flop count of one LSTM Cell for 1 time step.
         """
+
+        class LSTMCellNet(nn.Module):
+            """
+            A network with a single LSTM cell. This is used for testing if the flop
+            count of LSTM layers equals the flop count of an LSTM cell for one time-step.
+            """
+
+            def __init__(
+                    self,
+                    input_dim,
+                    hidden_dim,
+                    bias: bool
+            ) -> None:
+                super(LSTMCellNet, self).__init__()
+                self.lstm_cell = nn.LSTMCell(input_size=input_dim,
+                                             hidden_size=hidden_dim,
+                                             bias=bias)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.lstm_cell(x[0])
+                return x
+
         batch_size = 1
-        time_dim = 2
+        time_dim = 1
         input_dim = 3
         hidden_dim = 4
-        lstm_layers = 5
+        lstm_layers = 1
         bias = True
         batch_first = True
-        bidirectional = True
+        bidirectional = False
         proj_size = 0
         lstmNet = LSTMNet(input_dim, hidden_dim, lstm_layers, bias, batch_first, bidirectional, proj_size)
+        lstmcellNet = LSTMCellNet(input_dim, hidden_dim, bias)
         x = torch.randn(time_dim, batch_size, input_dim)
         flop_dict, _ = flop_count(lstmNet, (x,))
-        WarningMessage("Test Not Implemented Fully") # NOTE: to finish
+        lstmcell_flop_dict, _ = flop_count(lstmcellNet, (x,))
+
+        gt_dict = defaultdict(float)
+        gt_dict["lstm"] = sum(e for _, e in lstmcell_flop_dict.items())
+        self.assertDictEqual(
+            flop_dict,
+            gt_dict,
+            "LSTM layer failed to pass the flop count test.",
+        )
 
     def test_conv(self) -> None:
         """
@@ -365,17 +397,17 @@ class TestFlopCountAnalysis(unittest.TestCase):
         """
 
         def _test_conv(
-            conv_dim: int,
-            batch_size: int,
-            input_dim: int,
-            output_dim: int,
-            spatial_dim: int,
-            kernel_size: int,
-            padding: int,
-            stride: int,
-            group_size: int,
-            transpose: bool = False,
-            output_padding: int = 0,
+                conv_dim: int,
+                batch_size: int,
+                input_dim: int,
+                output_dim: int,
+                spatial_dim: int,
+                kernel_size: int,
+                padding: int,
+                stride: int,
+                group_size: int,
+                transpose: bool = False,
+                output_padding: int = 0,
         ) -> None:
             convNet = ConvNet(
                 conv_dim,
@@ -404,13 +436,13 @@ class TestFlopCountAnalysis(unittest.TestCase):
             else:
                 spatial_size = ((spatial_dim + 2 * padding) - kernel_size) // stride + 1
             gt_flop = (
-                batch_size
-                * input_dim
-                * output_dim
-                * (kernel_size ** conv_dim)
-                * (spatial_size ** conv_dim)
-                / group_size
-                / 1e9
+                    batch_size
+                    * input_dim
+                    * output_dim
+                    * (kernel_size ** conv_dim)
+                    * (spatial_size ** conv_dim)
+                    / group_size
+                    / 1e9
             )
             gt_dict = defaultdict(float)
             gt_dict["conv"] = gt_flop
@@ -796,13 +828,13 @@ class TestFlopCountAnalysis(unittest.TestCase):
         )
         flop_dict, _ = flop_count(batch_3d, (x,))
         gt_flop = (
-            4
-            * batch_size
-            * input_dim
-            * spatial_dim_x
-            * spatial_dim_y
-            * spatial_dim_z
-            / 1e9
+                4
+                * batch_size
+                * input_dim
+                * spatial_dim_x
+                * spatial_dim_y
+                * spatial_dim_z
+                / 1e9
         )
         gt_dict = defaultdict(float)
         gt_dict["batch_norm"] = gt_flop
@@ -966,7 +998,7 @@ class TestFlopCountHandles(unittest.TestCase):
 
     def test_torch_mm(self):
         for op_name, func in zip(
-            ["aten::mm", "aten::matmul"], [torch.mm, torch.matmul]
+                ["aten::mm", "aten::matmul"], [torch.mm, torch.matmul]
         ):
             counter = _DEFAULT_SUPPORTED_OPS[op_name]
 
