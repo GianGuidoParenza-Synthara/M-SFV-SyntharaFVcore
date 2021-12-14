@@ -365,20 +365,23 @@ class TestFlopCountAnalysis(unittest.TestCase):
                 x = self.lstm_cell(x[0])
                 return x
 
-        batch_size = 1
-        time_dim = 1
-        input_dim = 3
-        hidden_dim = 4
-        lstm_layers = 1
-        bias = True
-        batch_first = True
-        bidirectional = False
-        proj_size = 0
-        lstmNet = LSTMNet(input_dim, hidden_dim, lstm_layers, bias, batch_first, bidirectional, proj_size)
-        lstmcellNet = LSTMCellNet(input_dim, hidden_dim, bias)
-        x = torch.randn(time_dim, batch_size, input_dim)
-        flop_dict, _ = flop_count(lstmNet, (x,))
-        lstmcell_flop_dict, _ = flop_count(lstmcellNet, (x,))
+        def _test_lstm(
+                batch_size,
+                time_dim,
+                input_dim,
+                hidden_dim,
+                lstm_layers,
+                proj_size,
+                bidirectional=False,
+                bias=True,
+                batch_first=True,
+        ):
+            lstmNet = LSTMNet(input_dim, hidden_dim, lstm_layers, bias, batch_first, bidirectional, proj_size)
+            x = torch.randn(time_dim, batch_size, input_dim)
+            flop_dict, _ = flop_count(lstmNet, (x,))
+
+            lstmcellNet = LSTMCellNet(input_dim, hidden_dim, bias)
+            lstmcell_flop_dict, _ = flop_count(lstmcellNet, (x,))
 
         gt_dict = defaultdict(float)
         gt_dict["lstm"] = sum(e for _, e in lstmcell_flop_dict.items())
@@ -386,6 +389,63 @@ class TestFlopCountAnalysis(unittest.TestCase):
             flop_dict,
             gt_dict,
             "LSTM layer failed to pass the flop count test.",
+        )
+
+        # Test LSTM for 1 layer and 1 time step.
+        batch_size1 = 5
+        time_dim1 = 1
+        input_dim1 = 3
+        hidden_dim1 = 4
+        lstm_layers1 = 1
+        bidirectional1 = False
+        proj_size1 = 0
+
+        _test_lstm(
+            batch_size1,
+            time_dim1,
+            input_dim1,
+            hidden_dim1,
+            lstm_layers1,
+            proj_size1,
+            bidirectional1,
+        )
+
+        # Test LSTM for 5 layers and 5 time steps.
+        batch_size2 = 5
+        time_dim2 = 5
+        input_dim2 = 3
+        hidden_dim2 = 4
+        lstm_layers2 = 5
+        bidirectional2 = False
+        proj_size2 = 0
+
+        _test_lstm(
+            batch_size2,
+            time_dim2,
+            input_dim2,
+            hidden_dim2,
+            lstm_layers2,
+            proj_size2,
+            bidirectional2,
+        )
+
+        # Test bidirectional LSTM for 5 layers and 5 time steps.
+        batch_size3 = 5
+        time_dim3 = 5
+        input_dim3 = 3
+        hidden_dim3 = 4
+        lstm_layers3 = 5
+        bidirectional3 = True
+        proj_size3 = 0
+
+        _test_lstm(
+            batch_size3,
+            time_dim3,
+            input_dim3,
+            hidden_dim3,
+            lstm_layers3,
+            proj_size3,
+            bidirectional3,
         )
 
     def test_conv(self) -> None:
