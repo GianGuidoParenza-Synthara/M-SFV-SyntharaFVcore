@@ -4,6 +4,7 @@ import typing
 import unittest
 from collections import Counter, defaultdict
 from typing import Any, Dict, Tuple
+from warnings import WarningMessage
 
 import torch
 import torch.nn as nn
@@ -44,6 +45,36 @@ class ThreeNet(nn.Module):
         x = torch.flatten(x, 1)
         x = self.linear1(x)
         x = self.linear2(x)
+        return x
+
+
+class LSTMNet(nn.Module):
+    """
+    A network with LSTM layers. This is used for testing flop
+    count for LSTM layers.
+    """
+
+    def __init__(
+            self,
+            input_dim,
+            hidden_dim,
+            lstm_layers,
+            bias: bool,
+            batch_first,
+            bidirectional,
+            proj_size
+    ) -> None:
+        super(LSTMNet, self).__init__()
+        self.lstm = nn.LSTM(input_dim,
+                            hidden_dim,
+                            lstm_layers,
+                            bias=bias,
+                            batch_first=batch_first,
+                            bidirectional=bidirectional,
+                            proj_size=proj_size)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.lstm(x)
         return x
 
 
@@ -308,6 +339,126 @@ class TestFlopCountAnalysis(unittest.TestCase):
             flop_dict,
             gt_dict,
             "Fully connected layer failed to pass the flop count test.",
+        )
+
+    def test_lstm(self) -> None:
+        """
+        Test if the flop count of a network with one LSTM layer equals the
+        flop count of one LSTM Cell for 1 time step.
+        """
+
+        class LSTMCellNet(nn.Module):
+            """
+            A network with a single LSTM cell. This is used for testing if the flop
+            count of LSTM layers equals the flop count of an LSTM cell for one time-step.
+            """
+
+            def __init__(
+                    self,
+                    input_dim,
+                    hidden_dim,
+                    bias: bool
+            ) -> None:
+                super(LSTMCellNet, self).__init__()
+                self.lstm_cell = nn.LSTMCell(input_size=input_dim,
+                                             hidden_size=hidden_dim,
+                                             bias=bias)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.lstm_cell(x[0])
+                return x
+
+        def _test_lstm(
+                batch_size,
+                time_dim,
+                input_dim,
+                hidden_dim,
+                lstm_layers,
+                proj_size,
+                bidirectional=False,
+                bias=True,
+                batch_first=True,
+        ):
+            lstmNet = LSTMNet(input_dim, hidden_dim, lstm_layers, bias, batch_first, bidirectional, proj_size)
+            x = torch.randn(time_dim, batch_size, input_dim)
+            flop_dict, _ = flop_count(lstmNet, (x,))
+
+            lstmcellNet = LSTMCellNet(input_dim, hidden_dim, bias)
+            lstmcell_flop_dict, _ = flop_count(lstmcellNet, (x,))
+
+            if time_dim == 1 and lstm_layers == 1:
+                gt_dict = defaultdict(float)
+                gt_dict["lstm"] = sum(e for _, e in lstmcell_flop_dict.items())
+            elif time_dim == 5 and lstm_layers == 5 and bidirectional:
+                gt_dict = defaultdict(float)
+                gt_dict["lstm"] = sum(e for _, e in lstmcell_flop_dict.items()) * time_dim * lstm_layers * 2
+            elif time_dim == 5 and lstm_layers == 5:
+                gt_dict = defaultdict(float)
+                gt_dict["lstm"] = sum(e for _, e in lstmcell_flop_dict.items()) * time_dim * lstm_layers
+            else:
+                raise ValueError(f'No test implemented for ')
+
+            self.assertDictEqual(
+                flop_dict,
+                gt_dict,
+                "LSTM layer failed to pass the flop count test.",
+            )
+
+        # Test LSTM for 1 layer and 1 time step.
+        batch_size1 = 5
+        time_dim1 = 1
+        input_dim1 = 3
+        hidden_dim1 = 4
+        lstm_layers1 = 1
+        bidirectional1 = False
+        proj_size1 = 0
+
+        _test_lstm(
+            batch_size1,
+            time_dim1,
+            input_dim1,
+            hidden_dim1,
+            lstm_layers1,
+            proj_size1,
+            bidirectional1,
+        )
+
+        # Test LSTM for 5 layers and 5 time steps.
+        batch_size2 = 5
+        time_dim2 = 5
+        input_dim2 = 3
+        hidden_dim2 = 4
+        lstm_layers2 = 5
+        bidirectional2 = False
+        proj_size2 = 0
+
+        _test_lstm(
+            batch_size2,
+            time_dim2,
+            input_dim2,
+            hidden_dim2,
+            lstm_layers2,
+            proj_size2,
+            bidirectional2,
+        )
+
+        # Test bidirectional LSTM for 5 layers and 5 time steps.
+        batch_size3 = 5
+        time_dim3 = 5
+        input_dim3 = 3
+        hidden_dim3 = 4
+        lstm_layers3 = 5
+        bidirectional3 = True
+        proj_size3 = 0
+
+        _test_lstm(
+            batch_size3,
+            time_dim3,
+            input_dim3,
+            hidden_dim3,
+            lstm_layers3,
+            proj_size3,
+            bidirectional3,
         )
 
     def test_conv(self) -> None:
@@ -930,3 +1081,8 @@ class TestFlopCountHandles(unittest.TestCase):
                 op_name,
             )
             self.assertEqual(counter(*nodes), 60)
+
+
+if __name__ == "__main__":
+    tests = TestFlopCountAnalysis()
+    tests.test_lstm()
