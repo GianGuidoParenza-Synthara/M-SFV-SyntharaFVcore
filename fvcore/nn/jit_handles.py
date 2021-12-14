@@ -7,7 +7,6 @@ import typing
 from collections import Counter, OrderedDict
 from numbers import Number
 from typing import Any, Callable, List, Optional, Union
-from warnings import WarningMessage
 
 import numpy as np
 
@@ -84,7 +83,7 @@ def generic_activation_jit(op_name: Optional[str] = None) -> Handle:
 
             *_, bias, lstm_layers, dropout, _, bidirectional, batch_first = get_values(inputs)
 
-            ac_count = 11 * proj_size + (hidden_dim if hidden_dim != proj_size else 0)
+            ac_count = (hidden_dim * (input_dim + hidden_dim + 1))
 
             return ac_count * batch_size * (2 if bidirectional else 1) * lstm_layers * time_dim
 
