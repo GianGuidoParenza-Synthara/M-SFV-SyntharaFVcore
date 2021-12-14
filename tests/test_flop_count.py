@@ -1374,4 +1374,6 @@ class TestFlopCountHandles(unittest.TestCase):
 
 if __name__ == "__main__":
     tests = TestFlopCountAnalysis()
+    tests.test_rnn()
     tests.test_lstm()
+    tests.test_gru()

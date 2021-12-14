@@ -11,12 +11,10 @@ from warnings import WarningMessage
 
 import numpy as np
 
-
 try:
     from math import prod
 except ImportError:
     from numpy import prod
-
 
 Handle = Callable[[List[Any], List[Any]], Union[typing.Counter[str], Number]]
 
@@ -36,8 +34,10 @@ def get_shape(val: Any) -> Optional[List[int]]:
     else:
         return None
 
+
 def get_values(vals: List[Any]) -> Optional[List[Any]]:
     return [v.toIValue() for v in vals]
+
 
 """
 Below are flop/activation counters for various ops. Every counter has the following signature:
@@ -66,7 +66,7 @@ def generic_activation_jit(op_name: Optional[str] = None) -> Handle:
     """
 
     def _generic_activation_jit(
-        inputs: Any, outputs: List[Any]
+            inputs: Any, outputs: List[Any]
     ) -> Union[typing.Counter[str], Number]:
         """
         This is a generic jit handle that counts the number of activations for any
@@ -84,7 +84,7 @@ def generic_activation_jit(op_name: Optional[str] = None) -> Handle:
 
             *_, bias, lstm_layers, dropout, _, bidirectional, batch_first = get_values(inputs)
 
-            ac_count = 11 * proj_size + (hidden_dim  if hidden_dim != proj_size else 0)
+            ac_count = 11 * proj_size + (hidden_dim if hidden_dim != proj_size else 0)
 
             return ac_count * batch_size * (2 if bidirectional else 1) * lstm_layers * time_dim
 
@@ -130,11 +130,11 @@ def lstm_flop_jit(inputs: List[Any], outputs: List[Any]):
     *_, proj_size = get_shape(outputs[1])
     *_, hidden_dim = get_shape(outputs[2])
 
-    *_, bias, lstm_layers, dropout, _, bidirectional, batch_first = get_values(inputs)
+    *_, _, lstm_layers, _, _, bidirectional, batch_first = get_values(inputs)
 
     mm_flops = 4 * ((input_dim + hidden_dim) * proj_size) + (hidden_dim * proj_size if hidden_dim != proj_size else 0)
     mul_flops = 3 * proj_size
-    
+
     return (mm_flops + mul_flops) * batch_size * (2 if bidirectional else 1) * lstm_layers * time_dim
 
 
@@ -182,10 +182,10 @@ def bmm_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
 
 
 def conv_flop_count(
-    x_shape: List[int],
-    w_shape: List[int],
-    out_shape: List[int],
-    transposed: bool = False,
+        x_shape: List[int],
+        w_shape: List[int],
+        out_shape: List[int],
+        transposed: bool = False,
 ) -> Number:
     """
     Count flops for convolution. Note only multiplication is

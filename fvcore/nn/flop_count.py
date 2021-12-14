@@ -115,9 +115,9 @@ class FlopCountAnalysis(JitModelAnalysis):
     """
 
     def __init__(
-        self,
-        model: nn.Module,
-        inputs: Union[Tensor, Tuple[Tensor, ...]],
+            self,
+            model: nn.Module,
+            inputs: Union[Tensor, Tuple[Tensor, ...]],
     ) -> None:
         super().__init__(model=model, inputs=inputs)
         self.set_op_handle(**_DEFAULT_SUPPORTED_OPS)
@@ -126,9 +126,9 @@ class FlopCountAnalysis(JitModelAnalysis):
 
 
 def flop_count(
-    model: nn.Module,
-    inputs: Tuple[Any, ...],
-    supported_ops: Optional[Dict[str, Handle]] = None,
+        model: nn.Module,
+        inputs: Tuple[Any, ...],
+        supported_ops: Optional[Dict[str, Handle]] = None,
 ) -> Tuple[DefaultDict[str, float], Counter[str]]:
     """
     Given a model and an input to the model, compute the per-operator Gflops
