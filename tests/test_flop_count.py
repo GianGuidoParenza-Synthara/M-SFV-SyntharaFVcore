@@ -383,13 +383,23 @@ class TestFlopCountAnalysis(unittest.TestCase):
             lstmcellNet = LSTMCellNet(input_dim, hidden_dim, bias)
             lstmcell_flop_dict, _ = flop_count(lstmcellNet, (x,))
 
-        gt_dict = defaultdict(float)
-        gt_dict["lstm"] = sum(e for _, e in lstmcell_flop_dict.items())
-        self.assertDictEqual(
-            flop_dict,
-            gt_dict,
-            "LSTM layer failed to pass the flop count test.",
-        )
+            if time_dim == 1 and lstm_layers == 1:
+                gt_dict = defaultdict(float)
+                gt_dict["lstm"] = sum(e for _, e in lstmcell_flop_dict.items())
+            elif time_dim == 5 and lstm_layers == 5 and bidirectional:
+                gt_dict = defaultdict(float)
+                gt_dict["lstm"] = sum(e for _, e in lstmcell_flop_dict.items()) * time_dim * lstm_layers * 2
+            elif time_dim == 5 and lstm_layers == 5:
+                gt_dict = defaultdict(float)
+                gt_dict["lstm"] = sum(e for _, e in lstmcell_flop_dict.items()) * time_dim * lstm_layers
+            else:
+                raise ValueError(f'No test implemented for ')
+
+            self.assertDictEqual(
+                flop_dict,
+                gt_dict,
+                "LSTM layer failed to pass the flop count test.",
+            )
 
         # Test LSTM for 1 layer and 1 time step.
         batch_size1 = 5
