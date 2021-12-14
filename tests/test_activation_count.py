@@ -5,6 +5,7 @@ import typing
 import unittest
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Tuple
+from warnings import WarningMessage
 
 import torch
 import torch.nn as nn
@@ -182,3 +183,7 @@ class TestActivationCountAnalysis(unittest.TestCase):
         )
 
         self.assertDictEqual(gt_dict, acts_counter.by_module())
+
+if __name__ == "__main__":
+    tests = TestActivationCountAnalysis()
+    tests.test_lstm()
