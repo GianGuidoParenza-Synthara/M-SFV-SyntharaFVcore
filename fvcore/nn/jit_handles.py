@@ -85,7 +85,7 @@ def generic_activation_jit(op_name: Optional[str] = None) -> Handle:
 
             *_, bias, lstm_layers, dropout, _, bidirectional, batch_first = get_values(inputs)
 
-            ac_count = (hidden_dim * (input_dim + hidden_dim + 1))
+            ac_count = 11 * proj_size + (0 if proj_size == hidden_dim else hidden_dim)
 
             return ac_count * batch_size * (2 if bidirectional else 1) * lstm_layers * time_dim
 
