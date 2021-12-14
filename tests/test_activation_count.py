@@ -99,6 +99,30 @@ class TestActivationCountAnalysis(unittest.TestCase):
             gt_dict, ac_dict, "FC layer failed to pass the activation count test."
         )
 
+    def test_lstm(self) -> None:
+        """
+        Test the activation count for fully connected layer.
+        """
+        batch_size = 1
+        time_dim = 2
+        input_dim = 3
+        hidden_dim = 4
+        lstm_layers = 5
+        bias = True
+        batch_first = True
+        bidirectional = True
+        proj_size = 0
+        netLSTM = nn.LSTM(input_dim,
+                            hidden_dim,
+                            lstm_layers,
+                            bias= bias,
+                            batch_first= batch_first,
+                            bidirectional= bidirectional,
+                            proj_size= proj_size)
+        x = torch.randn(time_dim, batch_size, input_dim)
+        ac_dict, _ = activation_count(netLSTM, (x,))
+        Warning("Test Not Implemented Fully") # Note: this has to be implemted
+
     def test_supported_ops(self) -> None:
         """
         Test the activation count for user provided handles.

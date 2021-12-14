@@ -66,7 +66,7 @@ def generic_activation_jit(op_name: Optional[str] = None) -> Handle:
     """
 
     def _generic_activation_jit(
-        i: Any, outputs: List[Any]
+        inputs: Any, outputs: List[Any]
     ) -> Union[typing.Counter[str], Number]:
         """
         This is a generic jit handle that counts the number of activations for any
@@ -78,7 +78,15 @@ def generic_activation_jit(op_name: Optional[str] = None) -> Handle:
             return ac_count
 
         if op_name == "lstm":
-            raise WarningMessage("LSTM Act Not Implemented") # NOTE: to finish
+            time_dim, batch_size, input_dim = get_shape(inputs[0])
+            *_, proj_size = get_shape(outputs[1])
+            *_, hidden_dim = get_shape(outputs[2])
+
+            *_, bias, lstm_layers, dropout, _, bidirectional, batch_first = get_values(inputs)
+
+            ac_count = 11 * proj_size + (hidden_dim  if hidden_dim != proj_size else 0)
+
+            return ac_count * batch_size * (2 if bidirectional else 1) * lstm_layers * time_dim
 
         return Counter({op_name: ac_count})
 
