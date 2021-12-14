@@ -47,6 +47,36 @@ class ThreeNet(nn.Module):
         return x
 
 
+class RNNNet(nn.Module):
+    """
+    A network with RNN layers. This is used for testing flop
+    count for RNN layers.
+    """
+
+    def __init__(
+            self,
+            input_dim,
+            hidden_dim,
+            lstm_layers,
+            nonlinearity,
+            bias,
+            batch_first,
+            bidirectional,
+    ) -> None:
+        super(RNNNet, self).__init__()
+        self.rnn = nn.RNN(input_dim,
+                          hidden_dim,
+                          lstm_layers,
+                          nonlinearity=nonlinearity,
+                          bias=bias,
+                          batch_first=batch_first,
+                          bidirectional=bidirectional)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.rnn(x)
+        return x
+
+
 class LSTMNet(nn.Module):
     """
     A network with LSTM layers. This is used for testing flop
@@ -58,7 +88,7 @@ class LSTMNet(nn.Module):
             input_dim,
             hidden_dim,
             lstm_layers,
-            bias: bool,
+            bias,
             batch_first,
             bidirectional,
             proj_size
@@ -74,6 +104,34 @@ class LSTMNet(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.lstm(x)
+        return x
+
+
+class GRUNet(nn.Module):
+    """
+    A network with GRU layers. This is used for testing flop
+    count for GRU layers.
+    """
+
+    def __init__(
+            self,
+            input_dim,
+            hidden_dim,
+            lstm_layers,
+            bias,
+            batch_first,
+            bidirectional,
+    ) -> None:
+        super(GRUNet, self).__init__()
+        self.gru = nn.GRU(input_dim,
+                          hidden_dim,
+                          lstm_layers,
+                          bias=bias,
+                          batch_first=batch_first,
+                          bidirectional=bidirectional)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.gru(x)
         return x
 
 
@@ -338,10 +396,129 @@ class TestFlopCountAnalysis(unittest.TestCase):
             "Fully connected layer failed to pass the flop count test.",
         )
 
+    def test_rnn(self) -> None:
+        """
+        Test a network with RNN layers.
+        """
+
+        class RNNCellNet(nn.Module):
+            """
+            A network with a single RNN cell. This is used for testing if the flop
+            # count of RNN layers equals the flop count of an RNN cell for one time-step.
+            """
+
+            def __init__(
+                    self,
+                    input_dim,
+                    hidden_dim,
+                    bias: bool
+            ) -> None:
+                super(RNNCellNet, self).__init__()
+                self.gru_cell = nn.RNNCell(input_size=input_dim,
+                                           hidden_size=hidden_dim,
+                                           bias=bias)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.gru_cell(x[0])
+                return x
+
+        def _test_rnn(
+                batch_size,
+                time_dim,
+                input_dim,
+                hidden_dim,
+                rnn_layers,
+                nonlinearity,
+                bidirectional=False,
+                bias=True,
+                batch_first=True,
+        ):
+            rnnNet = RNNNet(input_dim, hidden_dim, rnn_layers, nonlinearity, bias, batch_first, bidirectional)
+            x = torch.randn(time_dim, batch_size, input_dim)
+            flop_dict, _ = flop_count(rnnNet, (x,))
+
+            rnncellNet = RNNCellNet(input_dim, hidden_dim, bias)
+            rnncell_flop_dict, _ = flop_count(rnncellNet, (x,))
+
+            if time_dim == 1 and rnn_layers == 1:
+                gt_dict = defaultdict(float)
+                gt_dict[f"rnn_{nonlinearity}"] = sum(e for _, e in rnncell_flop_dict.items())
+            elif time_dim == 5 and rnn_layers == 5 and bidirectional:
+                gt_dict = defaultdict(float)
+                gt_dict[f"rnn_{nonlinearity}"] = sum(
+                    e for _, e in rnncell_flop_dict.items()) * time_dim * rnn_layers * 2
+            elif time_dim == 5 and rnn_layers == 5:
+                gt_dict = defaultdict(float)
+                gt_dict[f"rnn_{nonlinearity}"] = sum(e for _, e in rnncell_flop_dict.items()) * time_dim * rnn_layers
+            else:
+                raise ValueError(
+                    f'No test implemented for parameters "time_dim": {time_dim}, "lstm_layers": {rnn_layers}'
+                    f' and "bidirectional": {bidirectional}.'
+                )
+
+            self.assertAlmostEqual(flop_dict[f"rnn_{nonlinearity}"], gt_dict[f"rnn_{nonlinearity}"],
+                                   msg="RNN layer failed to pass the flop count test.")
+
+        # Test RNN for 1 layer and 1 time step.
+        batch_size1 = 5
+        time_dim1 = 1
+        input_dim1 = 3
+        hidden_dim1 = 4
+        lstm_layers1 = 1
+        bidirectional1 = False
+        nonlinearity1 = 'relu'
+
+        _test_rnn(
+            batch_size1,
+            time_dim1,
+            input_dim1,
+            hidden_dim1,
+            lstm_layers1,
+            nonlinearity1,
+            bidirectional1,
+        )
+
+        # Test RNN for 5 layers and 5 time steps.
+        batch_size2 = 5
+        time_dim2 = 5
+        input_dim2 = 3
+        hidden_dim2 = 4
+        lstm_layers2 = 5
+        bidirectional2 = False
+        nonlinearity2 = 'tanh'
+
+        _test_rnn(
+            batch_size2,
+            time_dim2,
+            input_dim2,
+            hidden_dim2,
+            lstm_layers2,
+            nonlinearity2,
+            bidirectional2,
+        )
+
+        # Test bidirectional RNN for 5 layers and 5 time steps.
+        batch_size3 = 5
+        time_dim3 = 5
+        input_dim3 = 3
+        hidden_dim3 = 4
+        lstm_layers3 = 5
+        bidirectional3 = True
+        nonlinearity3 = 'tanh'
+
+        _test_rnn(
+            batch_size3,
+            time_dim3,
+            input_dim3,
+            hidden_dim3,
+            lstm_layers3,
+            nonlinearity3,
+            bidirectional3,
+        )
+
     def test_lstm(self) -> None:
         """
-        Test if the flop count of a network with one LSTM layer equals the
-        flop count of one LSTM Cell for 1 time step.
+        Test a network with a single fully connected layer.
         """
 
         class LSTMCellNet(nn.Module):
@@ -393,7 +570,10 @@ class TestFlopCountAnalysis(unittest.TestCase):
                 gt_dict = defaultdict(float)
                 gt_dict["lstm"] = sum(e for _, e in lstmcell_flop_dict.items()) * time_dim * lstm_layers
             else:
-                raise ValueError(f'No test implemented for ')
+                raise ValueError(
+                    f'No test implemented for parameters "time_dim": {time_dim}, "lstm_layers": {lstm_layers}'
+                    f' and "bidirectional": {bidirectional}.'
+                )
 
             self.assertDictEqual(
                 flop_dict,
@@ -455,6 +635,118 @@ class TestFlopCountAnalysis(unittest.TestCase):
             hidden_dim3,
             lstm_layers3,
             proj_size3,
+            bidirectional3,
+        )
+
+    def test_gru(self) -> None:
+        """
+        Test a network with a GRU layer.
+        """
+
+        class GRUCellNet(nn.Module):
+            """
+            A network with a single GRU cell. This is used for testing if the flop
+            count of GRU layers equals the flop count of an GRU cell for one time-step.
+            """
+
+            def __init__(
+                    self,
+                    input_dim,
+                    hidden_dim,
+                    bias: bool
+            ) -> None:
+                super(GRUCellNet, self).__init__()
+                self.gru_cell = nn.GRUCell(input_size=input_dim,
+                                           hidden_size=hidden_dim,
+                                           bias=bias)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.gru_cell(x[0])
+                return x
+
+        def _test_gru(
+                batch_size,
+                time_dim,
+                input_dim,
+                hidden_dim,
+                gru_layers,
+                bidirectional=False,
+                bias=True,
+                batch_first=True,
+        ):
+            gruNet = GRUNet(input_dim, hidden_dim, gru_layers, bias, batch_first, bidirectional)
+            x = torch.randn(time_dim, batch_size, input_dim)
+            flop_dict, _ = flop_count(gruNet, (x,))
+
+            grucellNet = GRUCellNet(input_dim, hidden_dim, bias)
+            grucell_flop_dict, _ = flop_count(grucellNet, (x,))
+
+            if time_dim == 1 and gru_layers == 1:
+                gt_dict = defaultdict(float)
+                gt_dict["gru"] = sum(e for _, e in grucell_flop_dict.items())
+            elif time_dim == 5 and gru_layers == 5 and bidirectional:
+                gt_dict = defaultdict(float)
+                gt_dict["gru"] = sum(e for _, e in grucell_flop_dict.items()) * time_dim * gru_layers * 2
+            elif time_dim == 5 and gru_layers == 5:
+                gt_dict = defaultdict(float)
+                gt_dict["gru"] = sum(e for _, e in grucell_flop_dict.items()) * time_dim * gru_layers
+            else:
+                raise ValueError(
+                    f'No test implemented for parameters "time_dim": {time_dim}, "gru_layers": {gru_layers}'
+                    f' and "bidirectional": {bidirectional}.'
+                )
+
+            self.assertAlmostEqual(flop_dict['gru'], gt_dict['gru'],
+                                   msg="GRU layer failed to pass the flop count test.")
+
+        # Test GRU for 1 layer and 1 time step.
+        batch_size1 = 5
+        time_dim1 = 1
+        input_dim1 = 3
+        hidden_dim1 = 4
+        lstm_layers1 = 1
+        bidirectional1 = False
+
+        _test_gru(
+            batch_size1,
+            time_dim1,
+            input_dim1,
+            hidden_dim1,
+            lstm_layers1,
+            bidirectional1,
+        )
+
+        # Test LSTM for 5 layers and 5 time steps.
+        batch_size2 = 5
+        time_dim2 = 5
+        input_dim2 = 3
+        hidden_dim2 = 4
+        lstm_layers2 = 5
+        bidirectional2 = False
+
+        _test_gru(
+            batch_size2,
+            time_dim2,
+            input_dim2,
+            hidden_dim2,
+            lstm_layers2,
+            bidirectional2,
+        )
+
+        # Test bidirectional LSTM for 5 layers and 5 time steps.
+        batch_size3 = 5
+        time_dim3 = 5
+        input_dim3 = 3
+        hidden_dim3 = 4
+        lstm_layers3 = 5
+        bidirectional3 = True
+
+        _test_gru(
+            batch_size3,
+            time_dim3,
+            input_dim3,
+            hidden_dim3,
+            lstm_layers3,
             bidirectional3,
         )
 

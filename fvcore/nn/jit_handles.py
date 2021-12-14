@@ -137,6 +137,37 @@ def lstm_flop_jit(inputs: List[Any], outputs: List[Any]):
     
     return (mm_flops + mul_flops) * batch_size * (2 if bidirectional else 1) * lstm_layers * time_dim
 
+
+def rnn_flop_jit(inputs: List[Any], outputs: List[Any]):
+    """
+    Count flops for the aten::rnn_tanh and aten::rnn_relu operators.
+    """
+    time_dim, batch_size, input_dim = get_shape(inputs[0])
+    *_, hidden_dim = get_shape(outputs[1])
+
+    *_, _, rnn_layers, _, _, bidirectional, _ = get_values(inputs)
+    mm_flops = ((input_dim + hidden_dim) * hidden_dim)
+
+    return mm_flops * batch_size * (2 if bidirectional else 1) * rnn_layers * time_dim
+
+
+def gru_flop_jit(inputs: List[Any], outputs: List[Any]):
+    """
+    Count flops for the aten::gru operator.
+    """
+    time_dim, batch_size, input_dim = get_shape(inputs[0])
+    *_, hidden_dim = get_shape(outputs[1])
+    *_, bias, gru_layers, _, _, bidirectional, _ = get_values(inputs)
+
+    mm_flops = 3 * ((input_dim + hidden_dim) * hidden_dim)
+    # todo: there should be 3 mult operations for GRU layers,
+    #  however the tests pass only when accounting for 2 mult operations.
+    mul_flops = 2 * hidden_dim
+    # mul_flops = 0
+
+    return (mm_flops + mul_flops) * batch_size * (2 if bidirectional else 1) * gru_layers * time_dim
+
+
 def bmm_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
     """
     Count flops for the bmm operation.

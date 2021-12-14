@@ -10,7 +10,6 @@ from torch import Tensor
 from .jit_analysis import JitModelAnalysis
 from .jit_handles import Handle, generic_activation_jit
 
-
 # A dictionary that maps supported operations to their activation count handles.
 _DEFAULT_SUPPORTED_OPS: Dict[str, Handle] = {
     "aten::_convolution": generic_activation_jit("conv"),
@@ -19,7 +18,10 @@ _DEFAULT_SUPPORTED_OPS: Dict[str, Handle] = {
     "aten::einsum": generic_activation_jit(),
     "aten::matmul": generic_activation_jit(),
     "aten::linear": generic_activation_jit(),
-    "aten::lstm": generic_activation_jit("lstm")
+    "aten::lstm": generic_activation_jit("lstm"),
+    "aten::rnn_tanh": generic_activation_jit("rnn"),
+    "aten::rnn_relu": generic_activation_jit("rnn"),
+    "aten::gru": generic_activation_jit("gru"),
 }
 
 

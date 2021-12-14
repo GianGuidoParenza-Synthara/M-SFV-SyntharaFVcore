@@ -20,8 +20,9 @@ from .jit_handles import (
     lstm_flop_jit,
     matmul_flop_jit,
     norm_flop_counter,
+    rnn_flop_jit,
+    gru_flop_jit,
 )
-
 
 # A dictionary that maps supported operations to their flop count jit handles.
 _DEFAULT_SUPPORTED_OPS: Dict[str, Handle] = {
@@ -31,10 +32,14 @@ _DEFAULT_SUPPORTED_OPS: Dict[str, Handle] = {
     "aten::einsum": einsum_flop_jit,
     "aten::matmul": matmul_flop_jit,
     "aten::mul": elementwise_flop_counter(1),
+    "aten::mul_": elementwise_flop_counter(1),
     "aten::multiply": elementwise_flop_counter(1),
     "aten::mm": matmul_flop_jit,
     "aten::linear": linear_flop_jit,
     "aten::lstm": lstm_flop_jit,
+    "aten::rnn_tanh": rnn_flop_jit,
+    "aten::rnn_relu": rnn_flop_jit,
+    "aten::gru": gru_flop_jit,
     # You might want to ignore BN flops due to inference-time fusion.
     # Use `set_op_handle("aten::batch_norm", None)
     "aten::batch_norm": batchnorm_flop_jit,
