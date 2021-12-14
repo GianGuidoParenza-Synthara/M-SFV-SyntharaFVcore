@@ -4,6 +4,7 @@ import typing
 import unittest
 from collections import Counter, defaultdict
 from typing import Any, Dict, Tuple
+from warnings import WarningMessage
 
 import torch
 import torch.nn as nn
@@ -44,6 +45,36 @@ class ThreeNet(nn.Module):
         x = torch.flatten(x, 1)
         x = self.linear1(x)
         x = self.linear2(x)
+        return x
+
+
+class LSTMNet(nn.Module):
+    """
+    A network with a single LSTM layer. This is used for testing flop
+    count for LSTM layers.
+    """
+
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        lstm_layers,
+        bias,
+        batch_first,
+        bidirectional,
+        proj_size
+    ) -> None:
+        super(LSTMNet, self).__init__()
+        self.lstm = nn.LSTM(input_dim,
+                            hidden_dim,
+                            lstm_layers,
+                            bias= bias,
+                            batch_first= batch_first,
+                            bidirectional= bidirectional,
+                            proj_size= proj_size)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.lstm(x)
         return x
 
 
@@ -309,6 +340,24 @@ class TestFlopCountAnalysis(unittest.TestCase):
             gt_dict,
             "Fully connected layer failed to pass the flop count test.",
         )
+
+    def test_lstm(self) -> None:
+        """
+        Test a network with a single fully connected layer.
+        """
+        batch_size = 1
+        time_dim = 2
+        input_dim = 3
+        hidden_dim = 4
+        lstm_layers = 5
+        bias = True
+        batch_first = True
+        bidirectional = True
+        proj_size = 0
+        lstmNet = LSTMNet(input_dim, hidden_dim, lstm_layers, bias, batch_first, bidirectional, proj_size)
+        x = torch.randn(time_dim, batch_size, input_dim)
+        flop_dict, _ = flop_count(lstmNet, (x,))
+        raise WarningMessage("Test Not Implemented Fully") # NOTE: to finish
 
     def test_conv(self) -> None:
         """
@@ -930,3 +979,8 @@ class TestFlopCountHandles(unittest.TestCase):
                 op_name,
             )
             self.assertEqual(counter(*nodes), 60)
+
+
+if __name__ == "__main__":
+    tests = TestFlopCountAnalysis()
+    tests.test_lstm()
