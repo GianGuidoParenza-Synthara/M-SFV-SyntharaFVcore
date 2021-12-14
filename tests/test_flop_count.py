@@ -50,28 +50,28 @@ class ThreeNet(nn.Module):
 
 class LSTMNet(nn.Module):
     """
-    A network with a single LSTM layer. This is used for testing flop
+    A network with LSTM layers. This is used for testing flop
     count for LSTM layers.
     """
 
     def __init__(
-        self,
-        input_dim,
-        hidden_dim,
-        lstm_layers,
-        bias,
-        batch_first,
-        bidirectional,
-        proj_size
+            self,
+            input_dim,
+            hidden_dim,
+            lstm_layers,
+            bias: bool,
+            batch_first,
+            bidirectional,
+            proj_size
     ) -> None:
         super(LSTMNet, self).__init__()
         self.lstm = nn.LSTM(input_dim,
                             hidden_dim,
                             lstm_layers,
-                            bias= bias,
-                            batch_first= batch_first,
-                            bidirectional= bidirectional,
-                            proj_size= proj_size)
+                            bias=bias,
+                            batch_first=batch_first,
+                            bidirectional=bidirectional,
+                            proj_size=proj_size)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.lstm(x)
@@ -340,21 +340,53 @@ class TestFlopCountAnalysis(unittest.TestCase):
 
     def test_lstm(self) -> None:
         """
-        Test a network with a single fully connected layer.
+        Test if the flop count of a network with one LSTM layer equals the
+        flop count of one LSTM Cell for 1 time step.
         """
+
+        class LSTMCellNet(nn.Module):
+            """
+            A network with a single LSTM cell. This is used for testing if the flop
+            count of LSTM layers equals the flop count of an LSTM cell for one time-step.
+            """
+
+            def __init__(
+                    self,
+                    input_dim,
+                    hidden_dim,
+                    bias: bool
+            ) -> None:
+                super(LSTMCellNet, self).__init__()
+                self.lstm_cell = nn.LSTMCell(input_size=input_dim,
+                                             hidden_size=hidden_dim,
+                                             bias=bias)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.lstm_cell(x[0])
+                return x
+
         batch_size = 1
-        time_dim = 2
+        time_dim = 1
         input_dim = 3
         hidden_dim = 4
-        lstm_layers = 5
+        lstm_layers = 1
         bias = True
         batch_first = True
-        bidirectional = True
+        bidirectional = False
         proj_size = 0
         lstmNet = LSTMNet(input_dim, hidden_dim, lstm_layers, bias, batch_first, bidirectional, proj_size)
+        lstmcellNet = LSTMCellNet(input_dim, hidden_dim, bias)
         x = torch.randn(time_dim, batch_size, input_dim)
         flop_dict, _ = flop_count(lstmNet, (x,))
-        WarningMessage("Test Not Implemented Fully") # NOTE: to finish
+        lstmcell_flop_dict, _ = flop_count(lstmcellNet, (x,))
+
+        gt_dict = defaultdict(float)
+        gt_dict["lstm"] = sum(e for _, e in lstmcell_flop_dict.items())
+        self.assertDictEqual(
+            flop_dict,
+            gt_dict,
+            "LSTM layer failed to pass the flop count test.",
+        )
 
     def test_conv(self) -> None:
         """
