@@ -10,7 +10,6 @@ from torch import Tensor
 from .jit_analysis import JitModelAnalysis
 from .jit_handles import Handle, generic_activation_jit
 
-
 # A dictionary that maps supported operations to their activation count handles.
 _DEFAULT_SUPPORTED_OPS: Dict[str, Handle] = {
     "aten::_convolution": generic_activation_jit("conv"),
@@ -19,7 +18,12 @@ _DEFAULT_SUPPORTED_OPS: Dict[str, Handle] = {
     "aten::einsum": generic_activation_jit(),
     "aten::matmul": generic_activation_jit(),
     "aten::linear": generic_activation_jit(),
-    "aten::lstm": generic_activation_jit("lstm")
+    "aten::lstm": generic_activation_jit("lstm"),
+    "aten::mul": generic_activation_jit(),
+    "aten::mul_": generic_activation_jit(),
+    "aten::rnn_tanh": generic_activation_jit("rnn"),
+    "aten::rnn_relu": generic_activation_jit("rnn"),
+    "aten::gru": generic_activation_jit("gru"),
 }
 
 
@@ -82,9 +86,9 @@ class ActivationCountAnalysis(JitModelAnalysis):
     """
 
     def __init__(
-        self,
-        model: nn.Module,
-        inputs: Union[Tensor, Tuple[Tensor, ...]],
+            self,
+            model: nn.Module,
+            inputs: Union[Tensor, Tuple[Tensor, ...]],
     ) -> None:
         super().__init__(model=model, inputs=inputs)
         self.set_op_handle(**_DEFAULT_SUPPORTED_OPS)
@@ -93,9 +97,9 @@ class ActivationCountAnalysis(JitModelAnalysis):
 
 
 def activation_count(
-    model: nn.Module,
-    inputs: Tuple[Any, ...],
-    supported_ops: Optional[Dict[str, Handle]] = None,
+        model: nn.Module,
+        inputs: Tuple[Any, ...],
+        supported_ops: Optional[Dict[str, Handle]] = None,
 ) -> Tuple[DefaultDict[str, float], Counter[str]]:
     """
     Given a model and an input to the model, compute the total number of
