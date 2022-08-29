@@ -87,6 +87,19 @@ jobs:
 
       - <<: *install_fvcore
 
+      - run:
+          name: isort
+          command: |
+            isort -c -sp .
+      - run:
+          name: black
+          command: |
+            black --check .
+      - run:
+          name: flake8
+          command: |
+            flake8 .
+
       - <<: *run_unittests
 
       - store_artifacts:
