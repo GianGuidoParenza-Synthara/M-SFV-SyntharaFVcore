@@ -1,13 +1,26 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
-
+# pyre-ignore-all-errors[2,3,14,53]
 import typing
 import unittest
 from collections import Counter, defaultdict
+from typing import Any, Dict, Tuple
 
 import torch
 import torch.nn as nn
-from fvcore.nn.flop_count import flop_count
-from fvcore.nn.jit_handles import batchnorm_flop_jit
+from fvcore.nn.flop_count import _DEFAULT_SUPPORTED_OPS, FlopCountAnalysis, flop_count
+from fvcore.nn.jit_handles import Handle
+from torch.autograd.function import Function
+from torch.nn import functional as F
+
+
+class _CustomOp(Function):
+    @staticmethod
+    def forward(ctx, input: torch.Tensor) -> torch.Tensor:
+        return input
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor) -> torch.Tensor:
+        return torch.ones_like(grad_output)
 
 
 class ThreeNet(nn.Module):
@@ -34,6 +47,94 @@ class ThreeNet(nn.Module):
         return x
 
 
+class RNNNet(nn.Module):
+    """
+    A network with RNN layers. This is used for testing flop
+    count for RNN layers.
+    """
+
+    def __init__(
+            self,
+            input_dim,
+            hidden_dim,
+            lstm_layers,
+            nonlinearity,
+            bias,
+            batch_first,
+            bidirectional,
+    ) -> None:
+        super(RNNNet, self).__init__()
+        self.rnn = nn.RNN(input_dim,
+                          hidden_dim,
+                          lstm_layers,
+                          nonlinearity=nonlinearity,
+                          bias=bias,
+                          batch_first=batch_first,
+                          bidirectional=bidirectional)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.rnn(x)
+        return x
+
+
+class LSTMNet(nn.Module):
+    """
+    A network with LSTM layers. This is used for testing flop
+    count for LSTM layers.
+    """
+
+    def __init__(
+            self,
+            input_dim,
+            hidden_dim,
+            lstm_layers,
+            bias,
+            batch_first,
+            bidirectional,
+            proj_size
+    ) -> None:
+        super(LSTMNet, self).__init__()
+        self.lstm = nn.LSTM(input_dim,
+                            hidden_dim,
+                            lstm_layers,
+                            bias=bias,
+                            batch_first=batch_first,
+                            bidirectional=bidirectional,
+                            proj_size=proj_size)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.lstm(x)
+        return x
+
+
+class GRUNet(nn.Module):
+    """
+    A network with GRU layers. This is used for testing flop
+    count for GRU layers.
+    """
+
+    def __init__(
+            self,
+            input_dim,
+            hidden_dim,
+            lstm_layers,
+            bias,
+            batch_first,
+            bidirectional,
+    ) -> None:
+        super(GRUNet, self).__init__()
+        self.gru = nn.GRU(input_dim,
+                          hidden_dim,
+                          lstm_layers,
+                          bias=bias,
+                          batch_first=batch_first,
+                          bidirectional=bidirectional)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.gru(x)
+        return x
+
+
 class ConvNet(nn.Module):
     """
     A network with a single convolution layer. This is used for testing flop
@@ -41,26 +142,37 @@ class ConvNet(nn.Module):
     """
 
     def __init__(
-        self,
-        conv_dim: int,
-        input_dim: int,
-        output_dim: int,
-        kernel_size: int,
-        spatial_dim: int,
-        stride: int,
-        padding: int,
-        groups_num: int,
+            self,
+            conv_dim: int,
+            input_dim: int,
+            output_dim: int,
+            kernel_size: int,
+            stride: int,
+            padding: int,
+            groups_num: int,
+            transpose: bool = False,
+            output_padding: int = 0,
     ) -> None:
         super(ConvNet, self).__init__()
-        if conv_dim == 1:
-            convLayer = nn.Conv1d
-        elif conv_dim == 2:
-            convLayer = nn.Conv2d
+        if transpose:
+            conv_layers = [nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d]
+            kwargs = {"output_padding": output_padding}
         else:
-            convLayer = nn.Conv3d
+            conv_layers = [nn.Conv1d, nn.Conv2d, nn.Conv3d]
+            assert (
+                    output_padding == 0
+            ), "output_padding is not supported for un-transposed convolutions."
+            kwargs = {}
+        convLayer = conv_layers[conv_dim - 1]
 
         self.conv = convLayer(
-            input_dim, output_dim, kernel_size, stride, padding, groups=groups_num
+            input_dim,
+            output_dim,
+            kernel_size,
+            stride,
+            padding,
+            groups=groups_num,
+            **kwargs
         )  # type: nn.Module
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -112,6 +224,17 @@ class MatmulNet(nn.Module):
         return x
 
 
+class BMMNet(nn.Module):
+    """
+    A network with a single torch.bmm operation. This is used for testing
+    flop count for torch.bmm.
+    """
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        x = torch.bmm(x, y)
+        return x
+
+
 class CustomNet(nn.Module):
     """
     A network with a fully connected layer followed by a sigmoid layer. This is
@@ -129,10 +252,20 @@ class CustomNet(nn.Module):
         return x
 
 
-class TestFlopCount(unittest.TestCase):
+class TestFlopCountAnalysis(unittest.TestCase):
     """
     Unittest for flop_count.
     """
+
+    def setUp(self) -> None:
+        # nn.Linear uses a different operator based on version, so make sure
+        # we are testing the right thing.
+        lin = nn.Linear(10, 10)
+        lin_x: torch.Tensor = torch.randn(10, 10)
+        trace = torch.jit.trace(lin, (lin_x,))
+        node_kinds = [node.kind() for node in trace.graph.nodes()]
+        assert "aten::addmm" in node_kinds or "aten::linear" in node_kinds
+        self.lin_op = "addmm" if "aten::addmm" in node_kinds else "linear"
 
     def test_customized_ops(self) -> None:
         """
@@ -141,9 +274,10 @@ class TestFlopCount(unittest.TestCase):
         The second case checks when a new handle for a default operation is
         passed. The new handle should overwrite the default handle.
         """
+
         # New handle for a new operation.
         def dummy_sigmoid_flop_jit(
-            inputs: typing.List[object], outputs: typing.List[object]
+                inputs: typing.List[Any], outputs: typing.List[Any]
         ) -> typing.Counter[str]:
             """
             A dummy handle function for sigmoid. Note the handle here does
@@ -157,22 +291,20 @@ class TestFlopCount(unittest.TestCase):
         input_dim = 5
         output_dim = 4
         customNet = CustomNet(input_dim, output_dim)
-        custom_ops = {"aten::sigmoid": dummy_sigmoid_flop_jit}
+        custom_ops: Dict[str, Handle] = {"aten::sigmoid": dummy_sigmoid_flop_jit}
         x = torch.rand(batch_size, input_dim)
         flop_dict1, _ = flop_count(customNet, (x,), supported_ops=custom_ops)
         flop_sigmoid = 10000 / 1e9
-        gt_dict1 = defaultdict(float)
-        gt_dict1["sigmoid"] = flop_sigmoid
-        self.assertDictEqual(
-            flop_dict1,
-            gt_dict1,
+        self.assertEqual(
+            flop_dict1["sigmoid"],
+            flop_sigmoid,
             "Customized operation handle failed to pass the flop count test.",
         )
 
         # New handle that overwrites a default handle addmm. So now the new
         # handle counts flops for the fully connected layer.
         def addmm_dummy_flop_jit(
-            inputs: typing.List[object], outputs: typing.List[object]
+                inputs: typing.List[object], outputs: typing.List[object]
         ) -> typing.Counter[str]:
             """
             A dummy handle function for fully connected layers. This overwrites
@@ -180,17 +312,17 @@ class TestFlopCount(unittest.TestCase):
             flop count. This is used for test only.
             """
             flop_dict = Counter()
-            flop_dict["addmm"] = 400000
+            flop_dict[self.lin_op] = 400000
             return flop_dict
 
-        custom_ops2 = {"aten::addmm": addmm_dummy_flop_jit}
+        custom_ops2: Dict[str, Handle] = {
+            "aten::{}".format(self.lin_op): addmm_dummy_flop_jit
+        }
         flop_dict2, _ = flop_count(customNet, (x,), supported_ops=custom_ops2)
         flop = 400000 / 1e9
-        gt_dict2 = defaultdict(float)
-        gt_dict2["addmm"] = flop
-        self.assertDictEqual(
-            flop_dict2,
-            gt_dict2,
+        self.assertEqual(
+            flop_dict2[self.lin_op],
+            flop,
             "Customized operation handle failed to pass the flop count test.",
         )
 
@@ -206,7 +338,7 @@ class TestFlopCount(unittest.TestCase):
         flop_dict, _ = flop_count(nn.Linear(input_dim, output_dim), (x,))
         gt_flop = batch_size * input_dim * output_dim / 1e9
         gt_dict = defaultdict(float)
-        gt_dict["addmm"] = gt_flop
+        gt_dict[self.lin_op] = gt_flop
         self.assertDictEqual(
             flop_dict, gt_dict, "nn.Linear failed to pass the flop count test."
         )
@@ -239,13 +371,389 @@ class TestFlopCount(unittest.TestCase):
         flop_dict, _ = flop_count(linearNet, (x,))
         gt_flop = batch_size * input_dim * output_dim / 1e9
         gt_dict = defaultdict(float)
-        gt_dict["addmm"] = gt_flop
+        gt_dict[self.lin_op] = gt_flop
         self.assertDictEqual(
             flop_dict,
             gt_dict,
             "Fully connected layer failed to pass the flop count test.",
         )
 
+        # Test with #input_dims>2
+        if self.lin_op != "linear":
+            # Skip this test if nn.Linear doesn't use aten::linear
+            # TODO: Stop skipping when multidimension aten::matmul
+            # flop counting is implemented
+            return
+        extra_dim = 5
+        x = torch.randn(batch_size, extra_dim, input_dim)
+        flop_dict, _ = flop_count(linearNet, (x,))
+        gt_flop = batch_size * input_dim * extra_dim * output_dim / 1e9
+        gt_dict = defaultdict(float)
+        gt_dict[self.lin_op] = gt_flop
+        self.assertDictEqual(
+            flop_dict,
+            gt_dict,
+            "Fully connected layer failed to pass the flop count test.",
+        )
+
+
+    def test_rnn(self) -> None:
+        """
+        Test a network with RNN layers.
+        """
+
+        class RNNCellNet(nn.Module):
+            """
+            A network with a single RNN cell. This is used for testing if the flop
+            # count of RNN layers equals the flop count of an RNN cell for one time-step.
+            """
+
+            def __init__(
+                    self,
+                    input_dim,
+                    hidden_dim,
+                    bias: bool
+            ) -> None:
+                super(RNNCellNet, self).__init__()
+                self.gru_cell = nn.RNNCell(input_size=input_dim,
+                                           hidden_size=hidden_dim,
+                                           bias=bias)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.gru_cell(x[0])
+                return x
+
+        def _test_rnn(
+                batch_size,
+                time_dim,
+                input_dim,
+                hidden_dim,
+                rnn_layers,
+                nonlinearity,
+                bidirectional=False,
+                bias=True,
+                batch_first=True,
+        ):
+            rnnNet = RNNNet(input_dim, hidden_dim, rnn_layers, nonlinearity, bias, batch_first, bidirectional)
+            x = torch.randn(time_dim, batch_size, input_dim)
+            flop_dict, _ = flop_count(rnnNet, (x,))
+
+            rnncellNet = RNNCellNet(input_dim, hidden_dim, bias)
+            rnncell_flop_dict, _ = flop_count(rnncellNet, (x,))
+
+            if time_dim == 1 and rnn_layers == 1:
+                gt_dict = defaultdict(float)
+                gt_dict[f"rnn_{nonlinearity}"] = sum(e for _, e in rnncell_flop_dict.items())
+            elif time_dim == 5 and rnn_layers == 5 and bidirectional:
+                gt_dict = defaultdict(float)
+                gt_dict[f"rnn_{nonlinearity}"] = sum(
+                    e for _, e in rnncell_flop_dict.items()) * time_dim * rnn_layers * 2
+            elif time_dim == 5 and rnn_layers == 5:
+                gt_dict = defaultdict(float)
+                gt_dict[f"rnn_{nonlinearity}"] = sum(e for _, e in rnncell_flop_dict.items()) * time_dim * rnn_layers
+            else:
+                raise ValueError(
+                    f'No test implemented for parameters "time_dim": {time_dim}, "lstm_layers": {rnn_layers}'
+                    f' and "bidirectional": {bidirectional}.'
+                )
+
+            self.assertAlmostEqual(flop_dict[f"rnn_{nonlinearity}"], gt_dict[f"rnn_{nonlinearity}"],
+                                   msg="RNN layer failed to pass the flop count test.")
+
+        # Test RNN for 1 layer and 1 time step.
+        batch_size1 = 5
+        time_dim1 = 1
+        input_dim1 = 3
+        hidden_dim1 = 4
+        lstm_layers1 = 1
+        bidirectional1 = False
+        nonlinearity1 = 'relu'
+
+        _test_rnn(
+            batch_size1,
+            time_dim1,
+            input_dim1,
+            hidden_dim1,
+            lstm_layers1,
+            nonlinearity1,
+            bidirectional1,
+        )
+
+        # Test RNN for 5 layers and 5 time steps.
+        batch_size2 = 5
+        time_dim2 = 5
+        input_dim2 = 3
+        hidden_dim2 = 4
+        lstm_layers2 = 5
+        bidirectional2 = False
+        nonlinearity2 = 'tanh'
+
+        _test_rnn(
+            batch_size2,
+            time_dim2,
+            input_dim2,
+            hidden_dim2,
+            lstm_layers2,
+            nonlinearity2,
+            bidirectional2,
+        )
+
+        # Test bidirectional RNN for 5 layers and 5 time steps.
+        batch_size3 = 5
+        time_dim3 = 5
+        input_dim3 = 3
+        hidden_dim3 = 4
+        lstm_layers3 = 5
+        bidirectional3 = True
+        nonlinearity3 = 'tanh'
+
+        _test_rnn(
+            batch_size3,
+            time_dim3,
+            input_dim3,
+            hidden_dim3,
+            lstm_layers3,
+            nonlinearity3,
+            bidirectional3,
+        )
+
+
+    def test_lstm(self) -> None:
+        """
+        Test a network with a single fully connected layer.
+        """
+
+        class LSTMCellNet(nn.Module):
+            """
+            A network with a single LSTM cell. This is used for testing if the flop
+            count of LSTM layers equals the flop count of an LSTM cell for one time-step.
+            """
+
+            def __init__(
+                    self,
+                    input_dim,
+                    hidden_dim,
+                    bias: bool
+            ) -> None:
+                super(LSTMCellNet, self).__init__()
+                self.lstm_cell = nn.LSTMCell(input_size=input_dim,
+                                             hidden_size=hidden_dim,
+                                             bias=bias)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.lstm_cell(x[0])
+                return x
+
+        def _test_lstm(
+                batch_size,
+                time_dim,
+                input_dim,
+                hidden_dim,
+                lstm_layers,
+                proj_size,
+                bidirectional=False,
+                bias=True,
+                batch_first=True,
+        ):
+            lstmNet = LSTMNet(input_dim, hidden_dim, lstm_layers, bias, batch_first, bidirectional, proj_size)
+            x = torch.randn(time_dim, batch_size, input_dim)
+            flop_dict, _ = flop_count(lstmNet, (x,))
+
+            lstmcellNet = LSTMCellNet(input_dim, hidden_dim, bias)
+            lstmcell_flop_dict, _ = flop_count(lstmcellNet, (x,))
+
+            if time_dim == 1 and lstm_layers == 1:
+                gt_dict = defaultdict(float)
+                gt_dict["lstm"] = sum(e for _, e in lstmcell_flop_dict.items())
+            elif time_dim == 5 and lstm_layers == 5 and bidirectional:
+                gt_dict = defaultdict(float)
+                gt_dict["lstm"] = sum(e for _, e in lstmcell_flop_dict.items()) * time_dim * lstm_layers * 2
+            elif time_dim == 5 and lstm_layers == 5:
+                gt_dict = defaultdict(float)
+                gt_dict["lstm"] = sum(e for _, e in lstmcell_flop_dict.items()) * time_dim * lstm_layers
+            else:
+                raise ValueError(
+                    f'No test implemented for parameters "time_dim": {time_dim}, "lstm_layers": {lstm_layers}'
+                    f' and "bidirectional": {bidirectional}.'
+                )
+
+            self.assertDictEqual(
+                flop_dict,
+                gt_dict,
+                "LSTM layer failed to pass the flop count test.",
+            )
+
+        # Test LSTM for 1 layer and 1 time step.
+        batch_size1 = 5
+        time_dim1 = 1
+        input_dim1 = 3
+        hidden_dim1 = 4
+        lstm_layers1 = 1
+        bidirectional1 = False
+        proj_size1 = 0
+
+        _test_lstm(
+            batch_size1,
+            time_dim1,
+            input_dim1,
+            hidden_dim1,
+            lstm_layers1,
+            proj_size1,
+            bidirectional1,
+        )
+
+        # Test LSTM for 5 layers and 5 time steps.
+        batch_size2 = 5
+        time_dim2 = 5
+        input_dim2 = 3
+        hidden_dim2 = 4
+        lstm_layers2 = 5
+        bidirectional2 = False
+        proj_size2 = 0
+
+        _test_lstm(
+            batch_size2,
+            time_dim2,
+            input_dim2,
+            hidden_dim2,
+            lstm_layers2,
+            proj_size2,
+            bidirectional2,
+        )
+
+        # Test bidirectional LSTM for 5 layers and 5 time steps.
+        batch_size3 = 5
+        time_dim3 = 5
+        input_dim3 = 3
+        hidden_dim3 = 4
+        lstm_layers3 = 5
+        bidirectional3 = True
+        proj_size3 = 0
+
+        _test_lstm(
+            batch_size3,
+            time_dim3,
+            input_dim3,
+            hidden_dim3,
+            lstm_layers3,
+            proj_size3,
+            bidirectional3,
+        )
+
+
+    def test_gru(self) -> None:
+        """
+        Test a network with a GRU layer.
+        """
+
+        class GRUCellNet(nn.Module):
+            """
+            A network with a single GRU cell. This is used for testing if the flop
+            count of GRU layers equals the flop count of an GRU cell for one time-step.
+            """
+
+            def __init__(
+                    self,
+                    input_dim,
+                    hidden_dim,
+                    bias: bool
+            ) -> None:
+                super(GRUCellNet, self).__init__()
+                self.gru_cell = nn.GRUCell(input_size=input_dim,
+                                           hidden_size=hidden_dim,
+                                           bias=bias)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.gru_cell(x[0])
+                return x
+
+        def _test_gru(
+                batch_size,
+                time_dim,
+                input_dim,
+                hidden_dim,
+                gru_layers,
+                bidirectional=False,
+                bias=True,
+                batch_first=True,
+        ):
+            gruNet = GRUNet(input_dim, hidden_dim, gru_layers, bias, batch_first, bidirectional)
+            x = torch.randn(time_dim, batch_size, input_dim)
+            flop_dict, _ = flop_count(gruNet, (x,))
+
+            grucellNet = GRUCellNet(input_dim, hidden_dim, bias)
+            grucell_flop_dict, _ = flop_count(grucellNet, (x,))
+
+            if time_dim == 1 and gru_layers == 1:
+                gt_dict = defaultdict(float)
+                gt_dict["gru"] = sum(e for _, e in grucell_flop_dict.items())
+            elif time_dim == 5 and gru_layers == 5 and bidirectional:
+                gt_dict = defaultdict(float)
+                gt_dict["gru"] = sum(e for _, e in grucell_flop_dict.items()) * time_dim * gru_layers * 2
+            elif time_dim == 5 and gru_layers == 5:
+                gt_dict = defaultdict(float)
+                gt_dict["gru"] = sum(e for _, e in grucell_flop_dict.items()) * time_dim * gru_layers
+            else:
+                raise ValueError(
+                    f'No test implemented for parameters "time_dim": {time_dim}, "gru_layers": {gru_layers}'
+                    f' and "bidirectional": {bidirectional}.'
+                )
+
+            self.assertAlmostEqual(flop_dict['gru'], gt_dict['gru'],
+                                   msg="GRU layer failed to pass the flop count test.")
+
+        # Test GRU for 1 layer and 1 time step.
+        batch_size1 = 5
+        time_dim1 = 1
+        input_dim1 = 3
+        hidden_dim1 = 4
+        lstm_layers1 = 1
+        bidirectional1 = False
+
+        _test_gru(
+            batch_size1,
+            time_dim1,
+            input_dim1,
+            hidden_dim1,
+            lstm_layers1,
+            bidirectional1,
+        )
+
+        # Test LSTM for 5 layers and 5 time steps.
+        batch_size2 = 5
+        time_dim2 = 5
+        input_dim2 = 3
+        hidden_dim2 = 4
+        lstm_layers2 = 5
+        bidirectional2 = False
+
+        _test_gru(
+            batch_size2,
+            time_dim2,
+            input_dim2,
+            hidden_dim2,
+            lstm_layers2,
+            bidirectional2,
+        )
+
+        # Test bidirectional LSTM for 5 layers and 5 time steps.
+        batch_size3 = 5
+        time_dim3 = 5
+        input_dim3 = 3
+        hidden_dim3 = 4
+        lstm_layers3 = 5
+        bidirectional3 = True
+
+        _test_gru(
+            batch_size3,
+            time_dim3,
+            input_dim3,
+            hidden_dim3,
+            lstm_layers3,
+            bidirectional3,
+        )
+        
+        
     def test_conv(self) -> None:
         """
         Test a network with a single convolution layer. The test cases are: 1)
@@ -255,25 +763,28 @@ class TestFlopCount(unittest.TestCase):
         """
 
         def _test_conv(
-            conv_dim: int,
-            batch_size: int,
-            input_dim: int,
-            output_dim: int,
-            spatial_dim: int,
-            kernel_size: int,
-            padding: int,
-            stride: int,
-            group_size: int,
+                conv_dim: int,
+                batch_size: int,
+                input_dim: int,
+                output_dim: int,
+                spatial_dim: int,
+                kernel_size: int,
+                padding: int,
+                stride: int,
+                group_size: int,
+                transpose: bool = False,
+                output_padding: int = 0,
         ) -> None:
             convNet = ConvNet(
                 conv_dim,
                 input_dim,
                 output_dim,
                 kernel_size,
-                spatial_dim,
                 stride,
                 padding,
                 group_size,
+                transpose,
+                output_padding,
             )
             assert conv_dim in [1, 2, 3], "Convolution dimension needs to be 1, 2, or 3"
             if conv_dim == 1:
@@ -286,15 +797,18 @@ class TestFlopCount(unittest.TestCase):
                 )
 
             flop_dict, _ = flop_count(convNet, (x,))
-            spatial_out = ((spatial_dim + 2 * padding) - kernel_size) // stride + 1
+            if transpose:
+                spatial_size = spatial_dim
+            else:
+                spatial_size = ((spatial_dim + 2 * padding) - kernel_size) // stride + 1
             gt_flop = (
-                batch_size
-                * input_dim
-                * output_dim
-                * (kernel_size ** conv_dim)
-                * (spatial_out ** conv_dim)
-                / group_size
-                / 1e9
+                    batch_size
+                    * input_dim
+                    * output_dim
+                    * (kernel_size ** conv_dim)
+                    * (spatial_size ** conv_dim)
+                    / group_size
+                    / 1e9
             )
             gt_dict = defaultdict(float)
             gt_dict["conv"] = gt_flop
@@ -437,6 +951,77 @@ class TestFlopCount(unittest.TestCase):
             group_size6,
         )
 
+        # Test flop count for transposed 2d convolution.
+        conv_dim7 = 2
+        batch_size7 = 5
+        input_dim7 = 10
+        output_dim7 = 3
+        spatial_dim7 = 15
+        kernel_size7 = 3
+        padding7 = 1
+        stride7 = 1
+        group_size7 = 1
+        _test_conv(
+            conv_dim7,
+            batch_size7,
+            input_dim7,
+            output_dim7,
+            spatial_dim7,
+            kernel_size7,
+            padding7,
+            stride7,
+            group_size7,
+            transpose=True,
+        )
+
+        # Test flop count for strided transposed 2d convolution.
+        conv_dim8 = 2
+        batch_size8 = 5
+        input_dim8 = 10
+        output_dim8 = 3
+        spatial_dim8 = 15
+        kernel_size8 = 3
+        padding8 = 1
+        stride8 = 2
+        group_size8 = 1
+        _test_conv(
+            conv_dim8,
+            batch_size8,
+            input_dim8,
+            output_dim8,
+            spatial_dim8,
+            kernel_size8,
+            padding8,
+            stride8,
+            group_size8,
+            transpose=True,
+        )
+
+        # Test flop count for strided transposed 2d convolution w/ output_padding.
+        conv_dim9 = 2
+        batch_size9 = 5
+        input_dim9 = 10
+        output_dim9 = 3
+        spatial_dim9 = 15
+        kernel_size9 = 3
+        padding9 = 1
+        stride9 = 3
+        group_size9 = 1
+        output_padding9 = 2
+        _test_conv(
+            conv_dim9,
+            batch_size9,
+            input_dim9,
+            output_dim9,
+            spatial_dim9,
+            kernel_size9,
+            padding9,
+            stride9,
+            group_size9,
+            transpose=True,
+            output_padding=output_padding9,
+        )
+
     def test_matmul(self) -> None:
         """
         Test flop count for operation matmul.
@@ -453,6 +1038,76 @@ class TestFlopCount(unittest.TestCase):
         gt_dict["matmul"] = gt_flop
         self.assertDictEqual(
             flop_dict, gt_dict, "Matmul operation failed to pass the flop count test."
+        )
+
+    def test_matmul_broadcast(self) -> None:
+        """
+        Test flop count for operation matmul.
+        """
+        m = 20
+        n = 10
+        p = 100
+        mNet = MatmulNet()
+        x = torch.randn(1, m, n)
+        y = torch.randn(1, n, p)
+        flop_dict, _ = flop_count(mNet, (x, y))
+        gt_flop = m * n * p / 1e9
+        gt_dict = defaultdict(float)
+        gt_dict["matmul"] = gt_flop
+        self.assertDictEqual(
+            flop_dict, gt_dict, "Matmul operation failed to pass the flop count test."
+        )
+
+        x = torch.randn(2, 2, m, n)
+        y = torch.randn(2, 2, n, p)
+        flop_dict, _ = flop_count(mNet, (x, y))
+        gt_flop = 4 * m * n * p / 1e9
+        gt_dict = defaultdict(float)
+        gt_dict["matmul"] = gt_flop
+        self.assertDictEqual(
+            flop_dict, gt_dict, "Matmul operation failed to pass the flop count test."
+        )
+
+        x = torch.randn(1, m, n)
+        y = torch.randn(n, p)
+        flop_dict, _ = flop_count(mNet, (x, y))
+        gt_flop = m * n * p / 1e9
+        gt_dict = defaultdict(float)
+        gt_dict["matmul"] = gt_flop
+        self.assertDictEqual(
+            flop_dict, gt_dict, "Matmul operation failed to pass the flop count test."
+        )
+
+        x = torch.randn(2, m, n)
+        y = torch.randn(n, p)
+        flop_dict, _ = flop_count(mNet, (x, y))
+        gt_flop = 2 * m * n * p / 1e9
+        gt_dict = defaultdict(float)
+        gt_dict["matmul"] = gt_flop
+        self.assertDictEqual(
+            flop_dict, gt_dict, "Matmul operation failed to pass the flop count test."
+        )
+
+    def test_bmm(self) -> None:
+        """
+        Test flop count for operation torch.bmm. The case checkes
+        torch.bmm with equation nct,ntp->ncp.
+        """
+        n = 2
+        c = 5
+        t = 2
+        p = 12
+        eNet = BMMNet()
+        x = torch.randn(n, c, t)
+        y = torch.randn(n, t, p)
+        flop_dict, _ = flop_count(eNet, (x, y))
+        gt_flop = n * t * p * c / 1e9
+        gt_dict = defaultdict(float)
+        gt_dict["bmm"] = gt_flop
+        self.assertDictEqual(
+            flop_dict,
+            gt_dict,
+            "bmm operation nct,ncp->ntp failed to pass the flop count test.",
         )
 
     def test_einsum(self) -> None:
@@ -500,15 +1155,14 @@ class TestFlopCount(unittest.TestCase):
         BatchNorm1d, BatchNorm2d and BatchNorm3d.
         """
         # Test for BatchNorm1d.
-        supported_ops = {"aten::batch_norm": batchnorm_flop_jit}
         batch_size = 10
         input_dim = 10
-        batch_1d = nn.BatchNorm1d(input_dim, affine=False)
+        batch_1d = nn.BatchNorm1d(input_dim, affine=False).eval()
         x = torch.randn(batch_size, input_dim)
-        flop_dict, _ = flop_count(batch_1d, (x,), supported_ops)
-        gt_flop = 4 * batch_size * input_dim / 1e9
+        flop_dict, _ = flop_count(batch_1d, (x,))
+        gt_flop = batch_size * input_dim / 1e9
         gt_dict = defaultdict(float)
-        gt_dict["batchnorm"] = gt_flop
+        gt_dict["batch_norm"] = gt_flop
         self.assertDictEqual(
             flop_dict, gt_dict, "BatchNorm1d failed to pass the flop count test."
         )
@@ -520,10 +1174,10 @@ class TestFlopCount(unittest.TestCase):
         spatial_dim_y = 5
         batch_2d = nn.BatchNorm2d(input_dim, affine=False)
         x = torch.randn(batch_size, input_dim, spatial_dim_x, spatial_dim_y)
-        flop_dict, _ = flop_count(batch_2d, (x,), supported_ops)
+        flop_dict, _ = flop_count(batch_2d, (x,))
         gt_flop = 4 * batch_size * input_dim * spatial_dim_x * spatial_dim_y / 1e9
         gt_dict = defaultdict(float)
-        gt_dict["batchnorm"] = gt_flop
+        gt_dict["batch_norm"] = gt_flop
         self.assertDictEqual(
             flop_dict, gt_dict, "BatchNorm2d failed to pass the flop count test."
         )
@@ -538,18 +1192,18 @@ class TestFlopCount(unittest.TestCase):
         x = torch.randn(
             batch_size, input_dim, spatial_dim_x, spatial_dim_y, spatial_dim_z
         )
-        flop_dict, _ = flop_count(batch_3d, (x,), supported_ops)
+        flop_dict, _ = flop_count(batch_3d, (x,))
         gt_flop = (
-            4
-            * batch_size
-            * input_dim
-            * spatial_dim_x
-            * spatial_dim_y
-            * spatial_dim_z
-            / 1e9
+                4
+                * batch_size
+                * input_dim
+                * spatial_dim_x
+                * spatial_dim_y
+                * spatial_dim_z
+                / 1e9
         )
         gt_dict = defaultdict(float)
-        gt_dict["batchnorm"] = gt_flop
+        gt_dict["batch_norm"] = gt_flop
         self.assertDictEqual(
             flop_dict, gt_dict, "BatchNorm3d failed to pass the flop count test."
         )
@@ -573,9 +1227,157 @@ class TestFlopCount(unittest.TestCase):
         flop_dict, _ = flop_count(threeNet, (x,))
         gt_dict = defaultdict(float)
         gt_dict["conv"] = flop1
-        gt_dict["addmm"] = flop2
+        gt_dict[self.lin_op] = flop2
+        gt_dict["adaptive_avg_pool2d"] = 2e-6
         self.assertDictEqual(
             flop_dict,
             gt_dict,
             "The three-layer network failed to pass the flop count test.",
         )
+
+    def test_flop_counter_class(self) -> None:
+        """
+        Test FlopCountAnalysis.
+        """
+        batch_size = 4
+        input_dim = 2
+        conv_dim = 5
+        spatial_dim = 10
+        linear_dim = 3
+        x = torch.randn(batch_size, input_dim, spatial_dim, spatial_dim)
+        threeNet = ThreeNet(input_dim, conv_dim, linear_dim)
+        flop1 = batch_size * conv_dim * input_dim * spatial_dim * spatial_dim
+        flop_linear1 = batch_size * conv_dim * linear_dim
+        flop_linear2 = batch_size * linear_dim * 1
+        flop_counter = FlopCountAnalysis(threeNet, (x,))
+        gt_dict = Counter(
+            {
+                "conv": flop1,
+                "linear1": flop_linear1,
+                "linear2": flop_linear2,
+                "pool": flop1 // input_dim,
+            }
+        )
+        gt_dict[""] = sum(gt_dict.values())
+        self.assertEqual(flop_counter.by_module(), gt_dict)
+
+    def test_autograd_function(self):
+        # test support on custom autograd function
+
+        class Mod(nn.Module):
+            def forward(self, x):
+                return _CustomOp.apply(x)
+
+        flop = FlopCountAnalysis(Mod(), (torch.rand(4, 5),)).set_op_handle(
+            "prim::PythonOp._CustomOp", lambda *args, **kwargs: 42
+        )
+        self.assertEqual(flop.total(), 42)
+
+    def test_scripted_function(self):
+        # Scripted function is not yet supported. It should produce a warning
+
+        def func(x):
+            return x @ x
+
+        class Mod(nn.Module):
+            def forward(self, x):
+                f = torch.jit.script(func)
+                return f(x * x)
+
+        flop = FlopCountAnalysis(Mod(), (torch.rand(5, 5),))
+        _ = flop.total()
+        self.assertIn("prim::CallFunction", flop.unsupported_ops())
+
+
+class TestFlopCountHandles(unittest.TestCase):
+    def _count_function(self, func, inputs, name) -> Tuple[Any, Any]:
+        tensor_inputs = [x for x in inputs if isinstance(x, torch.Tensor)]
+
+        def f(*args):
+            return func(*inputs)
+
+        graph = torch.jit.trace(f, tuple(tensor_inputs), check_trace=False).graph
+        nodes = [k for k in graph.nodes() if k.kind() == name]
+        self.assertEqual(len(nodes), 1)
+        node = nodes[0]
+        return list(node.inputs()), list(node.outputs())
+
+    def test_batch_norm(self):
+        op_name = "aten::batch_norm"
+        counter = _DEFAULT_SUPPORTED_OPS[op_name]
+
+        vec = torch.rand(2)
+        nodes = self._count_function(
+            F.batch_norm, (torch.rand(2, 2, 2, 2), vec, vec, vec, vec), op_name
+        )
+        self.assertEqual(counter(*nodes), 32)
+
+        nodes = self._count_function(
+            F.batch_norm,
+            (torch.rand(2, 2, 2, 2), vec, vec, None, None),
+            op_name,
+        )
+        self.assertEqual(counter(*nodes), 16)
+
+        nodes = self._count_function(
+            # training=True
+            F.batch_norm,
+            (torch.rand(2, 2, 2, 2), vec, vec, vec, vec, True),
+            op_name,
+        )
+        self.assertEqual(counter(*nodes), 80)
+
+    def test_group_norm(self):
+        op_name = "aten::group_norm"
+        counter = _DEFAULT_SUPPORTED_OPS[op_name]
+
+        vec = torch.rand(2)
+        nodes = self._count_function(
+            F.group_norm, (torch.rand(2, 2, 2, 2), 2, vec, vec), op_name
+        )
+        self.assertEqual(counter(*nodes), 80)
+
+        nodes = self._count_function(
+            F.group_norm, (torch.rand(2, 2, 2, 2), 2, None, None), op_name
+        )
+        self.assertEqual(counter(*nodes), 64)
+
+    def test_upsample(self):
+        op_name = "aten::upsample_bilinear2d"
+        counter = _DEFAULT_SUPPORTED_OPS[op_name]
+
+        nodes = self._count_function(
+            F.interpolate, (torch.rand(2, 2, 2, 2), None, 2, "bilinear", False), op_name
+        )
+        self.assertEqual(counter(*nodes), 2 ** 4 * 4 * 4)
+
+    def test_complicated_einsum(self):
+        op_name = "aten::einsum"
+        counter = _DEFAULT_SUPPORTED_OPS[op_name]
+
+        nodes = self._count_function(
+            torch.einsum,
+            ("nc,nchw->hw", torch.rand(3, 4), torch.rand(3, 4, 2, 3)),
+            op_name,
+        )
+        self.assertEqual(counter(*nodes), 72.0)
+
+    def test_torch_mm(self):
+        for op_name, func in zip(
+                ["aten::mm", "aten::matmul"], [torch.mm, torch.matmul]
+        ):
+            counter = _DEFAULT_SUPPORTED_OPS[op_name]
+
+            nodes = self._count_function(
+                func,
+                (torch.rand(3, 4), torch.rand(4, 5)),
+                op_name,
+            )
+            self.assertEqual(counter(*nodes), 60)
+
+
+if __name__ == "__main__":
+    tests = TestFlopCountAnalysis()
+    tests.test_rnn()
+    tests.test_lstm()
+    tests.test_gru()

@@ -21,8 +21,10 @@ def get_version():
     if os.getenv("BUILD_NIGHTLY", "0") == "1":
         from datetime import datetime
 
-        date_str = datetime.today().strftime("%y%m%d")
-        version = version + ".dev" + date_str
+        date_str = datetime.today().strftime("%Y%m%d")
+        # pip can perform proper comparison for ".post" suffix,
+        # i.e., "1.1.post1234" >= "1.1"
+        version = version + ".post" + date_str
 
         new_init_py = [l for l in init_py if not l.startswith("__version__")]
         new_init_py.append('__version__ = "{}"\n'.format(version))
@@ -45,10 +47,11 @@ setup(
         "yacs>=0.1.6",
         "pyyaml>=5.1",
         "tqdm",
-        "portalocker",
         "termcolor>=1.1",
         "Pillow",
         "tabulate",
+        "iopath>=0.1.7",
+        "dataclasses; python_version<'3.7'",
     ],
     extras_require={"all": ["shapely"]},
     packages=find_packages(exclude=("tests",)),

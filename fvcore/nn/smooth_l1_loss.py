@@ -8,18 +8,18 @@ def smooth_l1_loss(
 ) -> torch.Tensor:
     """
     Smooth L1 loss defined in the Fast R-CNN paper as:
-
-                  | 0.5 * x ** 2 / beta   if abs(x) < beta
-    smoothl1(x) = |
-                  | abs(x) - 0.5 * beta   otherwise,
+    ::
+                      | 0.5 * x ** 2 / beta   if abs(x) < beta
+        smoothl1(x) = |
+                      | abs(x) - 0.5 * beta   otherwise,
 
     where x = input - target.
 
     Smooth L1 loss is related to Huber loss, which is defined as:
-
-                | 0.5 * x ** 2                  if abs(x) < beta
-     huber(x) = |
-                | beta * (abs(x) - 0.5 * beta)  otherwise
+    ::
+                    | 0.5 * x ** 2                  if abs(x) < beta
+         huber(x) = |
+                    | beta * (abs(x) - 0.5 * beta)  otherwise
 
     Smooth L1 loss is equal to huber(x) / beta. This leads to the following
     differences:
@@ -53,7 +53,7 @@ def smooth_l1_loss(
         implement Smooth L1 loss, nor does it implement Huber loss. It implements
         the special case of both in which they are equal (beta=1).
         See: https://pytorch.org/docs/stable/nn.html#torch.nn.SmoothL1Loss.
-     """
+    """
     if beta < 1e-5:
         # if beta == 0, then torch.where will result in nan gradients when
         # the chain rule is applied due to pytorch implementation details
@@ -67,7 +67,7 @@ def smooth_l1_loss(
         loss = torch.where(cond, 0.5 * n ** 2 / beta, n - 0.5 * beta)
 
     if reduction == "mean":
-        loss = loss.mean()
+        loss = loss.mean() if loss.numel() > 0 else 0.0 * loss.sum()
     elif reduction == "sum":
         loss = loss.sum()
     return loss

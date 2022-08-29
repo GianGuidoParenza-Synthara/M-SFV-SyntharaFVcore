@@ -8,11 +8,35 @@ import typing
 import unittest
 from collections import OrderedDict
 from tempfile import TemporaryDirectory
+from typing import Tuple
 from unittest.mock import MagicMock
 
 import torch
 from fvcore.common.checkpoint import Checkpointer, PeriodicCheckpointer
 from torch import nn
+
+
+TORCH_VERSION: Tuple[int, ...] = tuple(int(x) for x in torch.__version__.split(".")[:2])
+if TORCH_VERSION >= (1, 11):
+    from torch.ao import quantization
+    from torch.ao.quantization import (
+        get_default_qat_qconfig,
+        prepare_qat,
+        disable_observer,
+        enable_fake_quant,
+    )
+elif (
+    TORCH_VERSION >= (1, 8)
+    and hasattr(torch.quantization, "FakeQuantizeBase")
+    and hasattr(torch.quantization, "ObserverBase")
+):
+    from torch import quantization
+    from torch.quantization import (
+        get_default_qat_qconfig,
+        prepare_qat,
+        disable_observer,
+        enable_fake_quant,
+    )
 
 
 class TestCheckpointer(unittest.TestCase):
@@ -23,7 +47,7 @@ class TestCheckpointer(unittest.TestCase):
         return nn.Sequential(nn.Linear(2, 3), nn.Linear(3, 1))
 
     def _create_complex_model(
-        self
+        self,
     ) -> typing.Tuple[nn.Module, typing.Dict[str, torch.Tensor]]:
         """
         Create a complex model.
@@ -44,6 +68,42 @@ class TestCheckpointer(unittest.TestCase):
         state_dict["res.layer2.bias"] = torch.rand(2)
 
         return m, state_dict
+
+    @unittest.skipIf(  # pyre-fixme[56]
+        (not hasattr(quantization, "ObserverBase"))
+        or (not hasattr(quantization, "FakeQuantizeBase")),
+        "quantization per-channel observer base classes not supported",
+    )
+    def test_loading_objects_with_expected_shape_mismatches(self) -> None:
+        def _get_model() -> torch.nn.Module:
+            m = nn.Sequential(nn.Conv2d(2, 2, 1))
+            m.qconfig = get_default_qat_qconfig("fbgemm")
+            m = prepare_qat(m)
+            return m
+
+        m1, m2 = _get_model(), _get_model()
+        # Calibrate m1 with data to populate the observer stats
+        m1(torch.randn(4, 2, 4, 4))
+        # Load m1's checkpoint into m2. This should work without errors even
+        # though the shapes of per-channel observer buffers do not match.
+        with TemporaryDirectory() as f:
+            checkpointer = Checkpointer(m1, save_dir=f)
+            checkpointer.save("checkpoint_file")
+
+            # in the same folder
+            fresh_checkpointer = Checkpointer(m2, save_dir=f)
+            self.assertTrue(fresh_checkpointer.has_checkpoint())
+            self.assertEqual(
+                fresh_checkpointer.get_checkpoint_file(),
+                os.path.join(f, "checkpoint_file.pth"),
+            )
+            fresh_checkpointer.load(fresh_checkpointer.get_checkpoint_file())
+            # Run the expected input through the network with observers
+            # disabled and fake_quant enabled. If buffers were loaded correctly
+            # into per-channel observers, this line will not crash.
+            m2.apply(disable_observer)
+            m2.apply(enable_fake_quant)
+            m2(torch.randn(4, 2, 4, 4))
 
     def test_from_last_checkpoint_model(self) -> None:
         """
@@ -179,11 +239,7 @@ class TestCheckpointer(unittest.TestCase):
             )
             state_dict = checkpointables.state_dict()
             for key, _ in state_dict.items():
-                self.assertTrue(
-                    # pyre-ignore
-                    checkpoint["checkpointables"].get(key)
-                    is not None
-                )
+                self.assertTrue(checkpoint["checkpointables"].get(key) is not None)
                 self.assertTrue(checkpoint["checkpointables"][key] == state_dict[key])
 
     def test_load_reused_params(self) -> None:
@@ -200,11 +256,35 @@ class TestCheckpointer(unittest.TestCase):
         new_model = Model(has_y=True)
         chkpt = Checkpointer(new_model)
         chkpt.logger = logger = MagicMock()
-        chkpt._load_model(data)
+        incompatible = chkpt._load_model(data)
+        chkpt._log_incompatible_keys(incompatible)
         self.assertTrue(
             torch.allclose(new_model.y.bias - 5.0, torch.zeros_like(new_model.y.bias))
         )
         logger.info.assert_not_called()
+
+    @unittest.skipIf(  # pyre-fixme[56]
+        not hasattr(nn, "LazyLinear"), "LazyModule not supported"
+    )
+    def test_load_lazy_module(self) -> None:
+        def _get_model() -> nn.Sequential:  # pyre-fixme[11]
+            return nn.Sequential(nn.LazyLinear(10))
+
+        m1, m2 = _get_model(), _get_model()
+        m1(torch.randn(4, 2, 4, 4))  # initialize m1, but not m2
+        # Load m1's checkpoint into m2.
+        with TemporaryDirectory() as f:
+            checkpointer = Checkpointer(m1, save_dir=f)
+            checkpointer.save("checkpoint_file")
+
+            fresh_checkpointer = Checkpointer(m2, save_dir=f)
+            self.assertTrue(fresh_checkpointer.has_checkpoint())
+            self.assertEqual(
+                fresh_checkpointer.get_checkpoint_file(),
+                os.path.join(f, "checkpoint_file.pth"),
+            )
+            fresh_checkpointer.load(fresh_checkpointer.get_checkpoint_file())
+            self.assertTrue(torch.equal(m1[0].weight, m2[0].weight))
 
 
 class TestPeriodicCheckpointer(unittest.TestCase):

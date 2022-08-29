@@ -6,7 +6,7 @@ import tempfile
 import unittest
 import uuid
 from typing import Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from fvcore.common.file_io import LazyPath, PathManager, get_cache_dir
 
@@ -19,7 +19,6 @@ class TestNativeIO(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls._tmpdir = tempfile.mkdtemp()
-        # pyre-ignore
         with open(os.path.join(cls._tmpdir, "test.txt"), "w") as f:
             cls._tmpfile = f.name
             f.write(cls._tmpfile_contents)
@@ -60,7 +59,6 @@ class TestNativeIO(unittest.TestCase):
     def test_exists(self) -> None:
         # pyre-ignore
         self.assertTrue(PathManager.exists(self._tmpfile))
-        # pyre-ignore
         fake_path = os.path.join(self._tmpdir, uuid.uuid4().hex)
         self.assertFalse(PathManager.exists(fake_path))
 
@@ -69,7 +67,7 @@ class TestNativeIO(unittest.TestCase):
         # This is a directory, not a file, so it should fail
         self.assertFalse(PathManager.isfile(self._tmpdir))  # pyre-ignore
         # This is a non-existing path, so it should fail
-        fake_path = os.path.join(self._tmpdir, uuid.uuid4().hex)  # pyre-ignore
+        fake_path = os.path.join(self._tmpdir, uuid.uuid4().hex)
         self.assertFalse(PathManager.isfile(fake_path))
 
     def test_isdir(self) -> None:
@@ -79,13 +77,12 @@ class TestNativeIO(unittest.TestCase):
         # pyre-ignore
         self.assertFalse(PathManager.isdir(self._tmpfile))
         # This is a non-existing path, so it should fail
-        # pyre-ignore
         fake_path = os.path.join(self._tmpdir, uuid.uuid4().hex)
         self.assertFalse(PathManager.isdir(fake_path))
 
     def test_ls(self) -> None:
         # Create some files in the tempdir to ls out.
-        root_dir = os.path.join(self._tmpdir, "ls")  # pyre-ignore
+        root_dir = os.path.join(self._tmpdir, "ls")
         os.makedirs(root_dir, exist_ok=True)
         files = sorted(["foo.txt", "bar.txt", "baz.txt"])
         for f in files:
@@ -98,7 +95,6 @@ class TestNativeIO(unittest.TestCase):
         shutil.rmtree(root_dir)
 
     def test_mkdirs(self) -> None:
-        # pyre-ignore
         new_dir_path = os.path.join(self._tmpdir, "new", "tmp", "dir")
         self.assertFalse(PathManager.exists(new_dir_path))
         PathManager.mkdirs(new_dir_path)
@@ -124,7 +120,6 @@ class TestNativeIO(unittest.TestCase):
         os.remove(_symlink)
 
     def test_rm(self) -> None:
-        # pyre-ignore
         with open(os.path.join(self._tmpdir, "test_rm.txt"), "w") as f:
             rm_file = f.name
             f.write(self._tmpfile_contents)
@@ -138,9 +133,7 @@ class TestNativeIO(unittest.TestCase):
     def test_bad_args(self) -> None:
         # TODO (T58240718): Replace with dynamic checks
         with self.assertRaises(ValueError):
-            PathManager.copy(
-                self._tmpfile, self._tmpfile, foo="foo"  # type: ignore
-            )
+            PathManager.copy(self._tmpfile, self._tmpfile, foo="foo")  # type: ignore
         with self.assertRaises(ValueError):
             PathManager.exists(self._tmpfile, foo="foo")  # type: ignore
         with self.assertRaises(ValueError):
@@ -160,9 +153,7 @@ class TestNativeIO(unittest.TestCase):
 
         PathManager.set_strict_kwargs_checking(False)
 
-        PathManager.copy(
-            self._tmpfile, self._tmpfile, foo="foo"  # type: ignore
-        )
+        PathManager.copy(self._tmpfile, self._tmpfile, foo="foo")  # type: ignore
         PathManager.exists(self._tmpfile, foo="foo")  # type: ignore
         PathManager.get_local_path(self._tmpfile, foo="foo")  # type: ignore
         PathManager.isdir(self._tmpfile, foo="foo")  # type: ignore
@@ -171,7 +162,6 @@ class TestNativeIO(unittest.TestCase):
         PathManager.mkdirs(self._tmpdir, foo="foo")  # type: ignore
         f = PathManager.open(self._tmpfile, foo="foo")  # type: ignore
         f.close()
-        # pyre-ignore
         with open(os.path.join(self._tmpdir, "test_rm.txt"), "w") as f:
             rm_file = f.name
             f.write(self._tmpfile_contents)
@@ -189,21 +179,6 @@ class TestHTTPIO(unittest.TestCase):
             shutil.rmtree(self._cache_dir)
         os.makedirs(self._cache_dir, exist_ok=True)
 
-    @patch("fvcore.common.file_io.get_cache_dir")
-    def test_get_local_path(self, mock_get_cache_dir) -> None:  # pyre-ignore
-        mock_get_cache_dir.return_value = self._cache_dir
-        local_path = PathManager.get_local_path(self._remote_uri)
-        self.assertTrue(os.path.exists(local_path))
-        self.assertTrue(os.path.isfile(local_path))
-
-    @patch("fvcore.common.file_io.get_cache_dir")
-    def test_open(self, mock_get_cache_dir) -> None:  # pyre-ignore
-        mock_get_cache_dir.return_value = self._cache_dir
-        with PathManager.open(self._remote_uri, "rb") as f:
-            self.assertTrue(os.path.exists(f.name))
-            self.assertTrue(os.path.isfile(f.name))
-            self.assertTrue(f.read() != "")
-
     def test_open_writes(self) -> None:
         # HTTPURLHandler does not support writing, only reading.
         with self.assertRaises(AssertionError):
@@ -218,9 +193,7 @@ class TestHTTPIO(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             PathManager.exists(self._remote_uri, foo="foo")  # type: ignore
         with self.assertRaises(ValueError):
-            PathManager.get_local_path(
-                self._remote_uri, foo="foo"  # type: ignore
-            )
+            PathManager.get_local_path(self._remote_uri, foo="foo")  # type: ignore
         with self.assertRaises(NotImplementedError):
             PathManager.isdir(self._remote_uri, foo="foo")  # type: ignore
         with self.assertRaises(NotImplementedError):
@@ -283,3 +256,17 @@ class TestLazyPath(unittest.TestCase):
             x[0]
         _ = os.fspath(x)
         self.assertEqual(x[0], "a")
+
+
+class TestOneDrive(unittest.TestCase):
+    _url = "https://1drv.ms/u/s!Aus8VCZ_C_33gQbJsUPTIj3rQu99"
+
+    def test_one_drive_download(self) -> None:
+        from fvcore.common.file_io import OneDrivePathHandler
+
+        _direct_url = OneDrivePathHandler().create_one_drive_direct_download(self._url)
+        _gt_url = (
+            "https://api.onedrive.com/v1.0/shares/u!aHR0cHM6Ly8xZHJ2Lm1zL3UvcyFBd"
+            + "XM4VkNaX0NfMzNnUWJKc1VQVElqM3JRdTk5/root/content"
+        )
+        self.assertEquals(_direct_url, _gt_url)

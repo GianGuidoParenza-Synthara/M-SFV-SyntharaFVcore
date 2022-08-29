@@ -46,10 +46,7 @@ class TestFocalLoss(unittest.TestCase):
         self.assertEqual(ce_loss, focal_loss.data)
         focal_loss.backward()
         ce_loss.backward()
-        self.assertTrue(
-            # pyre-ignore
-            torch.allclose(inputs_fl.grad.data, inputs_ce.grad.data)
-        )
+        self.assertTrue(torch.allclose(inputs_fl.grad.data, inputs_ce.grad.data))
 
     def test_easy_ex_focal_loss_less_than_ce_loss(self) -> None:
         """
@@ -190,6 +187,8 @@ class TestFocalLoss(unittest.TestCase):
         ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="mean")
         self.assertEqual(ce_loss, focal_loss)
 
+    # pyre-fixme[56]: Argument `not torch.cuda.is_available()` to decorator factory
+    #  `unittest.skipIf` could not be resolved in a global scope.
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     def test_focal_loss_equals_ce_loss_jit(self) -> None:
         """
@@ -209,9 +208,9 @@ class TestFocalLoss(unittest.TestCase):
     def focal_loss_with_init(N: int, alpha: float = -1) -> typing.Callable[[], None]:
         device = torch.device("cuda:0")
         inputs: torch.Tensor = logit(torch.rand(N)).to(device).requires_grad_()
-        targets: torch.Tensor = torch.randint(0, 2, (N,)).float().to(
-            device
-        ).requires_grad_()
+        targets: torch.Tensor = (
+            torch.randint(0, 2, (N,)).float().to(device).requires_grad_()
+        )
         torch.cuda.synchronize()
 
         def run_focal_loss() -> None:
@@ -229,9 +228,9 @@ class TestFocalLoss(unittest.TestCase):
     ) -> typing.Callable[[], None]:
         device = torch.device("cuda:0")
         inputs: torch.Tensor = logit(torch.rand(N)).to(device).requires_grad_()
-        targets: torch.Tensor = torch.randint(0, 2, (N,)).float().to(
-            device
-        ).requires_grad_()
+        targets: torch.Tensor = (
+            torch.randint(0, 2, (N,)).float().to(device).requires_grad_()
+        )
         torch.cuda.synchronize()
 
         def run_focal_loss_jit() -> None:
@@ -272,10 +271,7 @@ class TestFocalLossStar(unittest.TestCase):
         self.assertEqual(ce_loss, focal_loss_star.data)
         focal_loss_star.backward()
         ce_loss.backward()
-        self.assertTrue(
-            # pyre-ignore
-            torch.allclose(inputs_fl.grad.data, inputs_ce.grad.data)
-        )
+        self.assertTrue(torch.allclose(inputs_fl.grad.data, inputs_ce.grad.data))
 
     def test_easy_ex_focal_loss_star_less_than_ce_loss(self) -> None:
         """
@@ -411,6 +407,8 @@ class TestFocalLossStar(unittest.TestCase):
         ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="mean")
         self.assertEqual(ce_loss, focal_loss_star)
 
+    # pyre-fixme[56]: Argument `not torch.cuda.is_available()` to decorator factory
+    #  `unittest.skipIf` could not be resolved in a global scope.
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     def test_focal_loss_star_equals_ce_loss_jit(self) -> None:
         """
@@ -432,9 +430,9 @@ class TestFocalLossStar(unittest.TestCase):
     ) -> typing.Callable[[], None]:
         device = torch.device("cuda:0")
         inputs: torch.Tensor = logit(torch.rand(N)).to(device).requires_grad_()
-        targets: torch.Tensor = torch.randint(0, 2, (N,)).float().to(
-            device
-        ).requires_grad_()
+        targets: torch.Tensor = (
+            torch.randint(0, 2, (N,)).float().to(device).requires_grad_()
+        )
         torch.cuda.synchronize()
 
         def run_focal_loss_star() -> None:
@@ -452,9 +450,9 @@ class TestFocalLossStar(unittest.TestCase):
     ) -> typing.Callable[[], None]:
         device = torch.device("cuda:0")
         inputs: torch.Tensor = logit(torch.rand(N)).to(device).requires_grad_()
-        targets: torch.Tensor = torch.randint(0, 2, (N,)).float().to(
-            device
-        ).requires_grad_()
+        targets: torch.Tensor = (
+            torch.randint(0, 2, (N,)).float().to(device).requires_grad_()
+        )
         torch.cuda.synchronize()
 
         def run_focal_loss_star_jit() -> None:

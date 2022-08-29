@@ -52,6 +52,26 @@ class TestTransforms(unittest.TestCase):
         with self.assertRaises(AttributeError):
             transforms.no_existing
 
+    def test_register_with_decorator(self):
+        """
+        Test register using decorator.
+        """
+        dtype = "float"
+
+        @T.HFlipTransform.register_type(dtype)
+        def add1(t, x):
+            return x + 1
+
+        transforms = T.TransformList([T.HFlipTransform(3)])
+        self.assertEqual(transforms.apply_float(3), 4)
+
+    def test_noop_transform_no_register(self):
+        """
+        NoOpTransform does not need register - it's by default no-op.
+        """
+        t = T.NoOpTransform()
+        self.assertEqual(t.apply_anything(1), 1)
+
     @staticmethod
     def BlendTransform_img_gt(img, *args) -> Tuple[np.ndarray, list]:
         """
@@ -540,6 +560,25 @@ class TestTransforms(unittest.TestCase):
         coords = np.asarray(g.exterior.coords)
         self.assertEqual(coords[0].tolist(), coords[-1].tolist())
 
+    def test_crop_invalid_polygons(self):
+        # Ensure that invalid polygons are skipped.
+        transform = T.CropTransform(3, 4, 20, 20)
+        polygon = [
+            (0, 0),
+            (0, 3),
+            (3, 3),
+            (3, 0),
+            (2, 0),
+            (2, 2),
+            (1, 2),
+            (1, 1),
+            (2, 1),
+            (2, 0),
+            (0, 0),
+        ]
+        cropped_polygons = transform.apply_polygons([polygon])
+        self.assertEqual(0, len(cropped_polygons))
+
     @staticmethod
     def _coords_provider(
         num_coords: int = 5,
@@ -566,7 +605,7 @@ class TestTransforms(unittest.TestCase):
                     np.random.randint(low=w_min, high=w_max, size=(n, 1)),
                 ],
                 axis=1,
-            )
+            ).astype("float32")
 
     @staticmethod
     def BlendTransform_coords_gt(coords, *args) -> Tuple[np.ndarray, list]:
@@ -600,8 +639,8 @@ class TestTransforms(unittest.TestCase):
                 gt_transformer = getattr(self, "{}_coords_gt".format(_trans_name))
                 transformer = getattr(T, _trans_name)(*param)
 
-                result = transformer.apply_coords(coords)
-                coords_gt, shape_gt = gt_transformer(coords, *param)
+                result = transformer.apply_coords(np.copy(coords))
+                coords_gt, shape_gt = gt_transformer(np.copy(coords), *param)
 
                 self.assertEqual(
                     shape_gt,
@@ -649,8 +688,8 @@ class TestTransforms(unittest.TestCase):
             gt_transformer = getattr(self, "{}_coords_gt".format(_trans_name))
             transformer = getattr(T, _trans_name)(*param)
 
-            result = transformer.apply_coords(coords)
-            coords_gt, shape_gt = gt_transformer(coords, *param)
+            result = transformer.apply_coords(np.copy(coords))
+            coords_gt, shape_gt = gt_transformer(np.copy(coords), *param)
 
             self.assertEqual(
                 shape_gt,
@@ -698,8 +737,8 @@ class TestTransforms(unittest.TestCase):
             gt_transformer = getattr(self, "{}_coords_gt".format(_trans_name))
             transformer = getattr(T, _trans_name)(*param)
 
-            result = transformer.apply_coords(coords)
-            coords_gt, shape_gt = gt_transformer(coords, *param)
+            result = transformer.apply_coords(np.copy(coords))
+            coords_gt, shape_gt = gt_transformer(np.copy(coords), *param)
 
             self.assertEqual(
                 shape_gt,
@@ -715,6 +754,12 @@ class TestTransforms(unittest.TestCase):
                 "params {} given input with shape {}".format(
                     _trans_name, param, result.shape
                 ),
+            )
+
+            coords_inversed = transformer.inverse().apply_coords(result)
+            self.assertTrue(
+                np.allclose(coords_inversed, coords),
+                f"Transform {_trans_name}'s inverse fails to produce the original coordinates.",
             )
 
     @staticmethod
@@ -730,7 +775,7 @@ class TestTransforms(unittest.TestCase):
                 transformation.
             (list): expected shape of the output array.
         """
-        x0, y0, w, h = args
+        x0, y0, w, h, ow, oh = args
         coords[:, 0] -= x0
         coords[:, 1] -= y0
         return coords, coords.shape
@@ -741,15 +786,15 @@ class TestTransforms(unittest.TestCase):
         """
         _trans_name = "CropTransform"
         params = (
-            (0, 0, 0, 0),
-            (0, 0, 1, 1),
-            (0, 0, 6, 1),
-            (0, 0, 1, 6),
-            (0, 0, 6, 6),
-            (1, 3, 6, 6),
-            (3, 1, 6, 6),
-            (3, 3, 6, 6),
-            (6, 6, 6, 6),
+            (0, 0, 0, 0, 10, 11),
+            (0, 0, 1, 1, 10, 11),
+            (0, 0, 6, 1, 10, 11),
+            (0, 0, 1, 6, 10, 11),
+            (0, 0, 6, 6, 10, 11),
+            (1, 3, 6, 6, 10, 11),
+            (3, 1, 6, 6, 10, 11),
+            (3, 3, 6, 6, 10, 11),
+            (6, 6, 6, 6, 10, 11),
         )
         for coords, param in itertools.product(
             TestTransforms._coords_provider(), params
@@ -757,8 +802,8 @@ class TestTransforms(unittest.TestCase):
             gt_transformer = getattr(self, "{}_coords_gt".format(_trans_name))
             transformer = getattr(T, _trans_name)(*param)
 
-            result = transformer.apply_coords(coords)
-            coords_gt, shape_gt = gt_transformer(coords, *param)
+            result = transformer.apply_coords(np.copy(coords))
+            coords_gt, shape_gt = gt_transformer(np.copy(coords), *param)
 
             self.assertEqual(
                 shape_gt,
@@ -774,6 +819,12 @@ class TestTransforms(unittest.TestCase):
                 "params {} given input with shape {}".format(
                     _trans_name, param, result.shape
                 ),
+            )
+
+            coords_inversed = transformer.inverse().apply_coords(result)
+            self.assertTrue(
+                np.allclose(coords_inversed, coords),
+                f"Transform {_trans_name}'s inverse fails to produce the original coordinates.",
             )
 
     @staticmethod
@@ -816,8 +867,8 @@ class TestTransforms(unittest.TestCase):
             gt_transformer = getattr(self, "{}_coords_gt".format(_trans_name))
             transformer = getattr(T, _trans_name)(*param)
 
-            result = transformer.apply_coords(coords)
-            coords_gt, shape_gt = gt_transformer(coords, *param)
+            result = transformer.apply_coords(np.copy(coords))
+            coords_gt, shape_gt = gt_transformer(np.copy(coords), *param)
 
             self.assertEqual(
                 shape_gt,
@@ -833,6 +884,12 @@ class TestTransforms(unittest.TestCase):
                 "params {} given input with shape {}".format(
                     _trans_name, param, result.shape
                 ),
+            )
+
+            coords_inversed = transformer.inverse().apply_coords(result)
+            self.assertTrue(
+                np.allclose(coords_inversed, coords),
+                f"Transform {_trans_name}'s inverse fails to produce the original coordinates.",
             )
 
     @staticmethod
@@ -997,8 +1054,8 @@ class TestTransforms(unittest.TestCase):
             gt_transformer = getattr(self, "{}_coords_gt".format(_trans_name))
             transformer = getattr(T, _trans_name)(*param)
 
-            result = transformer.apply_coords(coords)
-            coords_gt, shape_gt = gt_transformer(coords, *param)
+            result = transformer.apply_coords(np.copy(coords))
+            coords_gt, shape_gt = gt_transformer(np.copy(coords), *param)
 
             self.assertEqual(
                 shape_gt,
@@ -1015,3 +1072,22 @@ class TestTransforms(unittest.TestCase):
                     _trans_name, param, result.shape
                 ),
             )
+
+    def test_transformlist_flatten(self):
+        t0 = T.HFlipTransform(width=100)
+        t1 = T.ScaleTransform(3, 4, 5, 6)
+        t2 = T.CropTransform(4, 5, 6, 7)
+        t = T.TransformList([T.TransformList([t0, t1]), t2])
+        self.assertEqual(len(t.transforms), 3)
+
+    def test_print_transform(self):
+        t0 = T.HFlipTransform(width=100)
+        self.assertEqual(str(t0), "HFlipTransform(width=100)")
+
+        t = T.TransformList([T.NoOpTransform(), t0])
+        self.assertEqual(str(t), f"TransformList[NoOpTransform(), {t0}]")
+
+        t = T.BlendTransform(np.zeros((100, 100, 100)), 1.0, 1.0)
+        self.assertEqual(
+            str(t), "BlendTransform(src_image=..., src_weight=1.0, dst_weight=1.0)"
+        )

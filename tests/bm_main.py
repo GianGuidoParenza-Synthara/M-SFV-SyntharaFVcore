@@ -3,7 +3,8 @@
 
 import glob
 import importlib
-from os.path import basename, dirname, isfile, join, sys
+import sys
+from os.path import basename, dirname, isfile, join
 
 
 if __name__ == "__main__":

@@ -68,14 +68,20 @@ class TestWeightInit(unittest.TestCase):
                     spatial_dim = k_size ** 3
 
                 # Calculate fan_in and fan_out.
+                # pyre-fixme[61]: `spatial_dim` may not be initialized here.
                 fan_in = c_in_dim * spatial_dim
+                # pyre-fixme[61]: `spatial_dim` may not be initialized here.
                 fan_out = c_out_dim * spatial_dim
 
                 # Msra weight init check.
                 c2_msra_fill(model)
                 self.assertTrue(
                     TestWeightInit.weight_and_bias_dist_match(
-                        model.weight, model.bias, TestWeightInit.msra_fill_std(fan_out)
+                        model.weight,
+                        model.bias,
+                        # pyre-fixme[6]: Expected `Tensor` for 3rd param but got
+                        #  `float`.
+                        TestWeightInit.msra_fill_std(fan_out),
                     )
                 )
 
@@ -83,7 +89,11 @@ class TestWeightInit(unittest.TestCase):
                 c2_xavier_fill(model)
                 self.assertTrue(
                     TestWeightInit.weight_and_bias_dist_match(
-                        model.weight, model.bias, TestWeightInit.xavier_fill_std(fan_in)
+                        model.weight,
+                        model.bias,
+                        # pyre-fixme[6]: Expected `Tensor` for 3rd param but got
+                        #  `float`.
+                        TestWeightInit.xavier_fill_std(fan_in),
                     )
                 )
 
@@ -107,7 +117,11 @@ class TestWeightInit(unittest.TestCase):
                 c2_msra_fill(model)
                 self.assertTrue(
                     TestWeightInit.weight_and_bias_dist_match(
-                        model.weight, model.bias, TestWeightInit.msra_fill_std(fan_out)
+                        model.weight,
+                        model.bias,
+                        # pyre-fixme[6]: Expected `Tensor` for 3rd param but got
+                        #  `float`.
+                        TestWeightInit.msra_fill_std(fan_out),
                     )
                 )
 
@@ -115,6 +129,10 @@ class TestWeightInit(unittest.TestCase):
                 c2_xavier_fill(model)
                 self.assertTrue(
                     TestWeightInit.weight_and_bias_dist_match(
-                        model.weight, model.bias, TestWeightInit.xavier_fill_std(fan_in)
+                        model.weight,
+                        model.bias,
+                        # pyre-fixme[6]: Expected `Tensor` for 3rd param but got
+                        #  `float`.
+                        TestWeightInit.xavier_fill_std(fan_in),
                     )
                 )

@@ -10,6 +10,7 @@ from fvcore.common.config import CfgNode
 from fvcore.common.history_buffer import HistoryBuffer
 from fvcore.common.registry import Registry
 from fvcore.common.timer import Timer
+from yaml.constructor import ConstructorError
 
 
 class TestHistoryBuffer(unittest.TestCase):
@@ -113,7 +114,7 @@ class TestTimer(unittest.TestCase):
                 time.sleep(t)
                 timer.pause()
                 self.assertTrue(
-                    math.isclose(pause_second, timer.avg_seconds(), rel_tol=5e-2),
+                    math.isclose(pause_second, timer.avg_seconds(), rel_tol=1e-1),
                     msg="{}: {}".format(pause_second, timer.avg_seconds()),
                 )
 
@@ -136,6 +137,9 @@ class TestCfgNode(unittest.TestCase):
 
         base_yaml = pkg_resources.resource_filename(__name__, "configs/base.yaml")
         config_yaml = pkg_resources.resource_filename(__name__, "configs/config.yaml")
+        config_multi_base_yaml = pkg_resources.resource_filename(
+            __name__, "configs/config_multi_base.yaml"
+        )
 
         cfg = TestCfgNode.gen_default_cfg()
         cfg.merge_from_file(base_yaml)
@@ -144,7 +148,7 @@ class TestCfgNode(unittest.TestCase):
 
         cfg = TestCfgNode.gen_default_cfg()
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(ConstructorError, "python/object/apply:eval"):
             # config.yaml contains unsafe yaml tags,
             # test if an exception is thrown
             cfg.merge_from_file(config_yaml)
@@ -153,6 +157,11 @@ class TestCfgNode(unittest.TestCase):
         self.assertEqual(cfg.KEY1, "base")
         self.assertEqual(cfg.KEY2, "config")
         self.assertEqual(cfg.EXPRESSION, [1, 4, 9])
+
+        cfg = TestCfgNode.gen_default_cfg()
+        cfg.merge_from_file(config_multi_base_yaml, allow_unsafe=True)
+        self.assertEqual(cfg.KEY1, "base2")
+        self.assertEqual(cfg.KEY2, "config")
 
     def test_merge_from_list(self) -> None:
         """
@@ -207,7 +216,7 @@ class TestRegistry(unittest.TestCase):
         class Object1:
             pass
 
-        with self.assertRaises(Exception) as err:
+        with self.assertRaises(AssertionError) as err:
             OBJECT_REGISTRY.register(Object1)
         self.assertTrue(
             "An object named 'Object1' was already registered in 'OBJECT' registry!"
@@ -221,4 +230,9 @@ class TestRegistry(unittest.TestCase):
         self.assertTrue(
             "No object named 'Object2' found in 'OBJECT' registry!"
             in str(err.exception)
+        )
+
+        items = list(OBJECT_REGISTRY)
+        self.assertListEqual(
+            items, [("Object1", Object1)], "Registry iterable contains valid item"
         )
