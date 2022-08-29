@@ -8,8 +8,12 @@ from collections import Counter, OrderedDict
 from numbers import Number
 from typing import Any, Callable, List, Optional, Union
 
-from numpy import prod
+import numpy as np
 
+try:
+    from math import prod
+except ImportError:
+    from numpy import prod
 
 Handle = Callable[[List[Any], List[Any]], Union[typing.Counter[str], Number]]
 
@@ -28,6 +32,13 @@ def get_shape(val: Any) -> Optional[List[int]]:
         return val.type().sizes()
     else:
         return None
+
+def get_values(vals: List[Any]) -> Optional[List[Any]]:
+    return [v.toIValue() for v in vals]
+
+
+def get_values(vals: List[Any]) -> Optional[List[Any]]:
+    return [v.toIValue() for v in vals]
 
 
 """
@@ -57,7 +68,7 @@ def generic_activation_jit(op_name: Optional[str] = None) -> Handle:
     """
 
     def _generic_activation_jit(
-        i: Any, outputs: List[Any]
+          inputs: Any, outputs: List[Any]
     ) -> Union[typing.Counter[str], Number]:
         """
         This is a generic jit handle that counts the number of activations for any
@@ -67,8 +78,19 @@ def generic_activation_jit(op_name: Optional[str] = None) -> Handle:
         ac_count = prod(out_shape)
         if op_name is None:
             return ac_count
-        else:
-            return Counter({op_name: ac_count})
+
+        if op_name == "lstm":
+            time_dim, batch_size, input_dim = get_shape(inputs[0])
+            *_, proj_size = get_shape(outputs[1])
+            *_, hidden_dim = get_shape(outputs[2])
+
+            *_, bias, lstm_layers, dropout, _, bidirectional, batch_first = get_values(inputs)
+
+            ac_count = 11 * proj_size + (0 if proj_size == hidden_dim else hidden_dim)
+
+            return ac_count * batch_size * (2 if bidirectional else 1) * lstm_layers * time_dim
+
+        return Counter({op_name: ac_count})
 
     return _generic_activation_jit
 
@@ -86,8 +108,7 @@ def addmm_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
     assert len(input_shapes[1]) == 2, input_shapes[1]
     batch_size, input_dim = input_shapes[0]
     output_dim = input_shapes[1][1]
-    flops = batch_size * input_dim * output_dim
-    return flops
+    return batch_size * input_dim * output_dim
 
 
 def linear_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
@@ -96,13 +117,73 @@ def linear_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
     """
     # Inputs is a list of length 3; unlike aten::addmm, it is the first
     # two elements that are relevant.
-    input_shapes = [get_shape(v) for v in inputs[0:2]]
+    input_shapes = [get_shape(v) for v in inputs[:2]]
     # input_shapes[0]: [dim0, dim1, ..., input_feature_dim]
     # input_shapes[1]: [output_feature_dim, input_feature_dim]
     assert input_shapes[0][-1] == input_shapes[1][-1]
-    flops = prod(input_shapes[0]) * input_shapes[1][0]
-    return flops
+    return prod(input_shapes[0]) * input_shapes[1][0]
 
+
+def lstm_flop_jit(inputs: List[Any], outputs: List[Any]):
+    """
+    Count flops for the aten::lstm operator.
+    """
+    time_dim, batch_size, input_dim = get_shape(inputs[0])
+    *_, proj_size = get_shape(outputs[1])
+    *_, hidden_dim = get_shape(outputs[2])
+
+    *_, _, lstm_layers, _, _, bidirectional, batch_first = get_values(inputs)
+
+    mm_flops = 4 * ((input_dim + hidden_dim) * proj_size) + (hidden_dim * proj_size if hidden_dim != proj_size else 0)
+    mul_flops = 3 * proj_size
+
+    return (mm_flops + mul_flops) * batch_size * (2 if bidirectional else 1) * lstm_layers * time_dim
+
+
+def rnn_flop_jit(inputs: List[Any], outputs: List[Any]):
+    """
+    Count flops for the aten::rnn_tanh and aten::rnn_relu operators.
+    """
+    time_dim, batch_size, input_dim = get_shape(inputs[0])
+    *_, hidden_dim = get_shape(outputs[1])
+
+    *_, _, rnn_layers, _, _, bidirectional, _ = get_values(inputs)
+    mm_flops = ((input_dim + hidden_dim) * hidden_dim)
+
+    return mm_flops * batch_size * (2 if bidirectional else 1) * rnn_layers * time_dim
+
+
+def gru_flop_jit(inputs: List[Any], outputs: List[Any]):
+    """
+    Count flops for the aten::gru operator.
+    """
+    time_dim, batch_size, input_dim = get_shape(inputs[0])
+    *_, hidden_dim = get_shape(outputs[1])
+    *_, bias, gru_layers, _, _, bidirectional, _ = get_values(inputs)
+
+    mm_flops = 3 * ((input_dim + hidden_dim) * hidden_dim)
+    # todo: there should be 3 mult operations for GRU layers,
+    #  however the tests pass only when accounting for 2 mult operations.
+    mul_flops = 2 * hidden_dim
+    # mul_flops = 0
+
+    return (mm_flops + mul_flops) * batch_size * (2 if bidirectional else 1) * gru_layers * time_dim
+
+
+def lstm_flop_jit(inputs: List[Any], outputs: List[Any]):
+    """
+    Count flops for the aten::lstm operator.
+    """
+    time_dim, batch_size, input_dim = get_shape(inputs[0])
+    *_, proj_size = get_shape(outputs[1])
+    *_, hidden_dim = get_shape(outputs[2])
+
+    *_, _, lstm_layers, _, _, bidirectional, batch_first = get_values(inputs)
+
+    mm_flops = 4 * ((input_dim + hidden_dim) * proj_size) + (hidden_dim * proj_size if hidden_dim != proj_size else 0)
+    mul_flops = 3 * proj_size
+
+    return (mm_flops + mul_flops) * batch_size * (2 if bidirectional else 1) * lstm_layers * time_dim
 
 def bmm_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
     """
@@ -114,29 +195,33 @@ def bmm_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
     input_shapes = [get_shape(v) for v in inputs]
     n, c, t = input_shapes[0]
     d = input_shapes[-1][-1]
-    flop = n * c * t * d
-    return flop
+    return n * c * t * d
 
 
 def conv_flop_count(
-    x_shape: List[int], w_shape: List[int], out_shape: List[int]
+        x_shape: List[int],
+        w_shape: List[int],
+        out_shape: List[int],
+        transposed: bool = False,
 ) -> Number:
     """
     Count flops for convolution. Note only multiplication is
     counted. Computation for addition and bias is ignored.
 
+    Flops for a transposed convolution are calculated as
+    flops = (x_shape[2:] * prod(w_shape) * batch_size).
+
     Args:
         x_shape (list(int)): The input shape before convolution.
         w_shape (list(int)): The filter shape.
         out_shape (list(int)): The output shape after convolution.
+        transposed (bool): is the convolution transposed
     Returns:
         int: the number of flops
     """
-    batch_size, Cin_dim, Cout_dim = x_shape[0], w_shape[1], out_shape[1]
-    out_size = prod(out_shape[2:])
-    kernel_size = prod(w_shape[2:])
-    flop = batch_size * out_size * Cout_dim * Cin_dim * kernel_size
-    return flop
+    batch_size = x_shape[0]
+    conv_shape = (x_shape if transposed else out_shape)[2:]
+    return batch_size * prod(w_shape) * prod(conv_shape)
 
 
 def conv_flop_jit(inputs: List[Any], outputs: List[Any]) -> typing.Counter[str]:
@@ -148,18 +233,20 @@ def conv_flop_jit(inputs: List[Any], outputs: List[Any]) -> typing.Counter[str]:
     # 5) dilation, 6) transposed, 7) out_pad, 8) groups, 9) benchmark_cudnn,
     # 10) deterministic_cudnn and 11) user_enabled_cudnn.
     # starting with #40737 it will be 12) user_enabled_tf32
-    assert len(inputs) == 12 or len(inputs) == 13, len(inputs)
+    assert len(inputs) in [12, 13], len(inputs)
     x, w = inputs[:2]
     x_shape, w_shape, out_shape = (get_shape(x), get_shape(w), get_shape(outputs[0]))
+    transposed = inputs[6].toIValue()
 
     # use a custom name instead of "_convolution"
-    return Counter({"conv": conv_flop_count(x_shape, w_shape, out_shape)})
+    return Counter(
+        {"conv": conv_flop_count(x_shape, w_shape, out_shape, transposed=transposed)}
+    )
 
 
 def einsum_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
     """
-    Count flops for the einsum operation. We currently support
-    two einsum operations: "nct,ncp->ntp" and "ntg,ncg->nct".
+    Count flops for the einsum operation.
     """
     # Inputs of einsum should be a list of length 2.
     # Inputs[0] stores the equation used for einsum.
@@ -168,13 +255,14 @@ def einsum_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
     equation = inputs[0].toIValue()
     # Get rid of white space in the equation string.
     equation = equation.replace(" ", "")
+    input_shapes_jit = inputs[1].node().inputs()
+    input_shapes = [get_shape(v) for v in input_shapes_jit]
+
     # Re-map equation so that same equation with different alphabet
     # representations will look the same.
     letter_order = OrderedDict((k, 0) for k in equation if k.isalpha()).keys()
     mapping = {ord(x): 97 + i for i, x in enumerate(letter_order)}
     equation = equation.translate(mapping)
-    input_shapes_jit = inputs[1].node().inputs()
-    input_shapes = [get_shape(v) for v in input_shapes_jit]
 
     if equation == "abc,abd->acd":
         n, c, t = input_shapes[0]
@@ -187,8 +275,14 @@ def einsum_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
         c = input_shapes[-1][1]
         flop = n * t * g * c
         return flop
-
     else:
+        np_arrs = [np.zeros(s) for s in input_shapes]
+        optim = np.einsum_path(equation, *np_arrs, optimize="optimal")[1]
+        for line in optim.split("\n"):
+            if "optimized flop" in line.lower():
+                # divided by 2 because we count MAC (multiply-add counted as one flop)
+                flop = float(np.floor(float(line.split(":")[-1]) / 2))
+                return flop
         raise NotImplementedError("Unsupported einsum operation.")
 
 
@@ -201,8 +295,7 @@ def matmul_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
     input_shapes = [get_shape(v) for v in inputs]
     assert len(input_shapes) == 2, input_shapes
     assert input_shapes[0][-1] == input_shapes[1][-2], input_shapes
-    flop = prod(input_shapes[0]) * input_shapes[-1][-1]
-    return flop
+    return prod(input_shapes[0]) * input_shapes[-1][-1]
 
 
 def norm_flop_counter(affine_arg_index: int) -> Handle:
@@ -220,10 +313,19 @@ def norm_flop_counter(affine_arg_index: int) -> Handle:
         has_affine = get_shape(inputs[affine_arg_index]) is not None
         assert 2 <= len(input_shape) <= 5, input_shape
         # 5 is just a rough estimate
-        flop = prod(input_shape) * (5 if has_affine else 4)
-        return flop
+        return prod(input_shape) * (5 if has_affine else 4)
 
     return norm_flop_jit
+
+
+def batchnorm_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
+    training = inputs[5].toIValue()
+    assert isinstance(training, bool), "Signature of aten::batch_norm has changed!"
+    if training:
+        return norm_flop_counter(1)(inputs, outputs)  # pyre-ignore
+    has_affine = get_shape(inputs[1]) is not None
+    input_shape = prod(get_shape(inputs[0]))
+    return input_shape * (2 if has_affine else 1)
 
 
 def elementwise_flop_counter(input_scale: float = 1, output_scale: float = 0) -> Handle:

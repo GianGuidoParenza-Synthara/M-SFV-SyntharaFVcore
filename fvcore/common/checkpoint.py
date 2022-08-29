@@ -1,5 +1,5 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
-# pyre-ignore-all-errors[2,3]
+# pyre-ignore-all-errors[2,3,58]
 
 import logging
 import os
@@ -13,6 +13,18 @@ from iopath.common.file_io import HTTPURLHandler, PathManager
 from termcolor import colored
 from torch.nn.parallel import DataParallel, DistributedDataParallel
 
+
+TORCH_VERSION: Tuple[int, ...] = tuple(int(x) for x in torch.__version__.split(".")[:2])
+if TORCH_VERSION >= (1, 11):
+    from torch.ao import quantization
+    from torch.ao.quantization import ObserverBase, FakeQuantizeBase
+elif (
+    TORCH_VERSION >= (1, 8)
+    and hasattr(torch.quantization, "FakeQuantizeBase")
+    and hasattr(torch.quantization, "ObserverBase")
+):
+    from torch import quantization
+    from torch.quantization import ObserverBase, FakeQuantizeBase
 
 __all__ = ["Checkpointer", "PeriodicCheckpointer"]
 
@@ -177,7 +189,7 @@ class Checkpointer:
             # if file doesn't exist, maybe because it has just been
             # deleted by a separate process
             return ""
-        return os.path.join(self.save_dir, last_saved)  # pyre-fixme[6]
+        return os.path.join(self.save_dir, last_saved)
 
     def get_all_checkpoint_files(self) -> List[str]:
         """
@@ -282,8 +294,8 @@ class Checkpointer:
 
                     has_observer_base_classes = (
                         TORCH_VERSION >= (1, 8)
-                        and hasattr(torch.quantization, "ObserverBase")
-                        and hasattr(torch.quantization, "FakeQuantizeBase")
+                        and hasattr(quantization, "ObserverBase")
+                        and hasattr(quantization, "FakeQuantizeBase")
                     )
                     if has_observer_base_classes:
                         # Handle the special case of quantization per channel observers,
@@ -299,8 +311,8 @@ class Checkpointer:
                             return cur_module
 
                         cls_to_skip = (
-                            torch.quantization.ObserverBase,
-                            torch.quantization.FakeQuantizeBase,
+                            ObserverBase,
+                            FakeQuantizeBase,
                         )
                         target_module = _get_module_for_key(self.model, k)
                         if isinstance(target_module, cls_to_skip):
@@ -311,7 +323,6 @@ class Checkpointer:
 
                     incorrect_shapes.append((k, shape_checkpoint, shape_model))
                     checkpoint_state_dict.pop(k)
-        # pyre-ignore
         incompatible = self.model.load_state_dict(checkpoint_state_dict, strict=False)
         return _IncompatibleKeys(
             missing_keys=incompatible.missing_keys,
@@ -336,9 +347,9 @@ class Checkpointer:
                 self.model, incompatible.missing_keys
             )
             if missing_keys:
-                self.logger.info(get_missing_parameters_message(missing_keys))
+                self.logger.warning(get_missing_parameters_message(missing_keys))
         if incompatible.unexpected_keys:
-            self.logger.info(
+            self.logger.warning(
                 get_unexpected_parameters_message(incompatible.unexpected_keys)
             )
 
@@ -420,8 +431,6 @@ class PeriodicCheckpointer:
 
             if self.max_to_keep is not None:
                 self.recent_checkpoints.append(self.checkpointer.get_checkpoint_file())
-                # pyre-fixme[58]: `>` is not supported for operand types `int` and
-                #  `Optional[int]`.
                 if len(self.recent_checkpoints) > self.max_to_keep:
                     file_to_delete = self.recent_checkpoints.pop(0)
                     if self.path_manager.exists(
@@ -430,7 +439,6 @@ class PeriodicCheckpointer:
                         self.path_manager.rm(file_to_delete)
 
         if self.max_iter is not None:
-            # pyre-fixme[58]
             if iteration >= self.max_iter - 1:
                 self.checkpointer.save(f"{self.file_prefix}_final", **additional_state)
 
@@ -454,7 +462,6 @@ def _filter_reused_missing_keys(model: nn.Module, keys: List[str]) -> List[str]:
     keyset = set(keys)
     param_to_names = defaultdict(set)  # param -> names that points to it
     for module_prefix, module in _named_modules_with_dup(model):
-        # pyre-fixme[58]: `+` is not supported for operand types `nn.Parameter` and `torch.Tensor`
         for name, param in list(module.named_parameters(recurse=False)) + list(
             module.named_buffers(recurse=False)
         ):

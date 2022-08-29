@@ -155,7 +155,7 @@ def _remove_zero_statistics(
             with submodules removed if they have zero for all statistics.
     """
     out_stats: Dict[str, Dict[str, int]] = {}
-    _force_keep: Set[str] = force_keep if force_keep else set()
+    _force_keep: Set[str] = force_keep if force_keep else set() | {""}
 
     def keep_stat(name: str) -> None:
         prefix = name + ("." if name else "")
@@ -199,7 +199,7 @@ def _fill_missing_statistics(
             values filled with zero.
     """
     out_stats = {name: stat.copy() for name, stat in statistics.items()}
-    for mod_name, _ in model.named_modules():  # pyre-ignore[16]
+    for mod_name, _ in model.named_modules():
         for stat in out_stats.values():
             if mod_name not in stat:
                 stat[mod_name] = 0
@@ -251,7 +251,8 @@ def _model_stats_str(model: nn.Module, statistics: Dict[str, Dict[str, str]]) ->
     def repr_with_statistics(module: nn.Module, name: str) -> str:
         # We treat the extra repr like the sub-module, one item per line
         extra_lines = []
-        extra_repr = module.extra_repr()  # pyre-ignore[16]
+        # pyre-fixme[29]: `Union[nn.Module, torch.Tensor]` is not a function.
+        extra_repr = module.extra_repr()
         printed_stats = print_statistics(name)
         # empty string will be split into list ['']
         if extra_repr:
@@ -266,7 +267,8 @@ def _model_stats_str(model: nn.Module, statistics: Dict[str, Dict[str, str]]) ->
             child_lines.append("(" + key + "): " + submod_str)
         lines = extra_lines + child_lines
 
-        main_str = module._get_name() + "("  # pyre-ignore[16]
+        # pyre-fixme[29]: `Union[nn.Module, torch.Tensor]` is not a function.
+        main_str = module._get_name() + "("
         if lines:
             # simple one-liner info, which most builtin Modules will use
             if len(extra_lines) == 1 and not child_lines:
@@ -614,7 +616,7 @@ def flop_count_table(
 
     Examples:
     ::
-        print(flop_count_table(model, FlopCountAnalysis(model, inputs)))
+        print(flop_count_table(FlopCountAnalysis(model, inputs)))
     """
     params_header = "#parameters" + (" or shape" if show_param_shapes else "")
     flops_header, acts_header = "#flops", "#activations"

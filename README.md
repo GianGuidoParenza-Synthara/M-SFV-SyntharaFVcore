@@ -3,7 +3,7 @@
 fvcore is a light-weight core library that provides the most common and essential
 functionality shared in various computer vision frameworks developed in FAIR,
 such as [Detectron2](https://github.com/facebookresearch/detectron2/),
-[PySlowFast](https://github.com/facebookresearch/SlowFast)
+[PySlowFast](https://github.com/facebookresearch/SlowFast), and
 [ClassyVision](https://github.com/facebookresearch/ClassyVision).
 All components in this library are type-annotated, tested, and benchmarked.
 
@@ -11,9 +11,12 @@ The computer vision team in FAIR is responsible for maintaining this library.
 
 ## Features:
 
-Besides some basic utilities, the most notable features of fvcore are:
+Besides some basic utilities, fvcore includes the following features:
+* Common pytorch layers, functions and losses in [fvcore.nn](fvcore/nn/).
 * A hierarchical per-operator flop counting tool: see [this note for details](./docs/flop_count.md).
-* Recursive parameter counting: [Doc](https://detectron2.readthedocs.io/en/latest/modules/fvcore.html#fvcore.nn.parameter_count).
+* Recursive parameter counting: see [API doc](https://detectron2.readthedocs.io/en/latest/modules/fvcore.html#fvcore.nn.parameter_count).
+* Recompute BatchNorm population statistics: see its [API doc](https://detectron2.readthedocs.io/en/latest/modules/fvcore.html#fvcore.nn.update_bn_stats).
+* A stateless, scale-invariant hyperparameter scheduler: see its [API doc](https://detectron2.readthedocs.io/en/latest/modules/fvcore.html#fvcore.common.param_scheduler.ParamScheduler).
 
 ## Install:
 
@@ -45,4 +48,4 @@ pip install -e fvcore
 
 ## License
 
-This library is released under the [Apache 2.0 license](https://github.com/facebookresearch/fvcore/blob/master/LICENSE).
+This library is released under the [Apache 2.0 license](https://github.com/facebookresearch/fvcore/blob/main/LICENSE).

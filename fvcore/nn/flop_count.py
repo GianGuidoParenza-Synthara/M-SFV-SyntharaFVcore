@@ -11,15 +11,18 @@ from .jit_analysis import JitModelAnalysis
 from .jit_handles import (
     Handle,
     addmm_flop_jit,
+    batchnorm_flop_jit,
     bmm_flop_jit,
     conv_flop_jit,
     einsum_flop_jit,
     elementwise_flop_counter,
     linear_flop_jit,
+    lstm_flop_jit,
     matmul_flop_jit,
     norm_flop_counter,
+    rnn_flop_jit,
+    gru_flop_jit,
 )
-
 
 # A dictionary that maps supported operations to their flop count jit handles.
 _DEFAULT_SUPPORTED_OPS: Dict[str, Handle] = {
@@ -28,10 +31,18 @@ _DEFAULT_SUPPORTED_OPS: Dict[str, Handle] = {
     "aten::_convolution": conv_flop_jit,
     "aten::einsum": einsum_flop_jit,
     "aten::matmul": matmul_flop_jit,
+    "aten::mul": elementwise_flop_counter(1),
+    "aten::mul_": elementwise_flop_counter(1),
+    "aten::multiply": elementwise_flop_counter(1),
+    "aten::mm": matmul_flop_jit,
     "aten::linear": linear_flop_jit,
+    "aten::lstm": lstm_flop_jit,
+    "aten::rnn_tanh": rnn_flop_jit,
+    "aten::rnn_relu": rnn_flop_jit,
+    "aten::gru": gru_flop_jit,
     # You might want to ignore BN flops due to inference-time fusion.
     # Use `set_op_handle("aten::batch_norm", None)
-    "aten::batch_norm": norm_flop_counter(1),
+    "aten::batch_norm": batchnorm_flop_jit,
     "aten::group_norm": norm_flop_counter(2),
     "aten::layer_norm": norm_flop_counter(2),
     "aten::instance_norm": norm_flop_counter(1),
@@ -104,9 +115,9 @@ class FlopCountAnalysis(JitModelAnalysis):
     """
 
     def __init__(
-        self,
-        model: nn.Module,
-        inputs: Union[Tensor, Tuple[Tensor, ...]],
+            self,
+            model: nn.Module,
+            inputs: Union[Tensor, Tuple[Tensor, ...]],
     ) -> None:
         super().__init__(model=model, inputs=inputs)
         self.set_op_handle(**_DEFAULT_SUPPORTED_OPS)
@@ -115,9 +126,9 @@ class FlopCountAnalysis(JitModelAnalysis):
 
 
 def flop_count(
-    model: nn.Module,
-    inputs: Tuple[Any, ...],
-    supported_ops: Optional[Dict[str, Handle]] = None,
+        model: nn.Module,
+        inputs: Tuple[Any, ...],
+        supported_ops: Optional[Dict[str, Handle]] = None,
 ) -> Tuple[DefaultDict[str, float], Counter[str]]:
     """
     Given a model and an input to the model, compute the per-operator Gflops

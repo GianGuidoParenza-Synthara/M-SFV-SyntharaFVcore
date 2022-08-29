@@ -58,7 +58,6 @@ class TestHistoryBuffer(unittest.TestCase):
             values, iterations = zip(*buf.values())
             self.assertEqual(len(values), buffer_len)
             self.assertEqual(len(iterations), buffer_len)
-            # pyre-fixme[16]: `bool` has no attribute `all`.
             self.assertTrue((values == gt[-buffer_len:]).all())
             iterations_gt = np.arange(gt_len - buffer_len, gt_len)
             self.assertTrue(
@@ -138,6 +137,9 @@ class TestCfgNode(unittest.TestCase):
 
         base_yaml = pkg_resources.resource_filename(__name__, "configs/base.yaml")
         config_yaml = pkg_resources.resource_filename(__name__, "configs/config.yaml")
+        config_multi_base_yaml = pkg_resources.resource_filename(
+            __name__, "configs/config_multi_base.yaml"
+        )
 
         cfg = TestCfgNode.gen_default_cfg()
         cfg.merge_from_file(base_yaml)
@@ -155,6 +157,11 @@ class TestCfgNode(unittest.TestCase):
         self.assertEqual(cfg.KEY1, "base")
         self.assertEqual(cfg.KEY2, "config")
         self.assertEqual(cfg.EXPRESSION, [1, 4, 9])
+
+        cfg = TestCfgNode.gen_default_cfg()
+        cfg.merge_from_file(config_multi_base_yaml, allow_unsafe=True)
+        self.assertEqual(cfg.KEY1, "base2")
+        self.assertEqual(cfg.KEY2, "config")
 
     def test_merge_from_list(self) -> None:
         """
