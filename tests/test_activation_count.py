@@ -310,3 +310,7 @@ class TestActivationCountAnalysis(unittest.TestCase):
         )
 
         self.assertDictEqual(gt_dict, acts_counter.by_module())
+
+if __name__ == "__main__":
+    tests = TestActivationCountAnalysis()
+    tests.test_lstm()
