@@ -4,6 +4,7 @@ import typing
 import unittest
 from collections import Counter, defaultdict
 from typing import Any, Dict, Tuple
+from warnings import WarningMessage
 
 import torch
 import torch.nn as nn
@@ -105,6 +106,7 @@ class LSTMNet(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.lstm(x)
         return x
+
 
 
 class GRUNet(nn.Module):
@@ -395,7 +397,7 @@ class TestFlopCountAnalysis(unittest.TestCase):
             gt_dict,
             "Fully connected layer failed to pass the flop count test.",
         )
-
+        
 
     def test_rnn(self) -> None:
         """
@@ -576,7 +578,7 @@ class TestFlopCountAnalysis(unittest.TestCase):
                     f'No test implemented for parameters "time_dim": {time_dim}, "lstm_layers": {lstm_layers}'
                     f' and "bidirectional": {bidirectional}.'
                 )
-
+                
             self.assertDictEqual(
                 flop_dict,
                 gt_dict,

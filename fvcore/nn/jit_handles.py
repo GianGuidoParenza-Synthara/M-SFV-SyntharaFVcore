@@ -33,6 +33,9 @@ def get_shape(val: Any) -> Optional[List[int]]:
     else:
         return None
 
+def get_values(vals: List[Any]) -> Optional[List[Any]]:
+    return [v.toIValue() for v in vals]
+
 
 def get_values(vals: List[Any]) -> Optional[List[Any]]:
     return [v.toIValue() for v in vals]
@@ -65,7 +68,7 @@ def generic_activation_jit(op_name: Optional[str] = None) -> Handle:
     """
 
     def _generic_activation_jit(
-            inputs: Any, outputs: List[Any]
+          inputs: Any, outputs: List[Any]
     ) -> Union[typing.Counter[str], Number]:
         """
         This is a generic jit handle that counts the number of activations for any
@@ -181,7 +184,6 @@ def lstm_flop_jit(inputs: List[Any], outputs: List[Any]):
     mul_flops = 3 * proj_size
 
     return (mm_flops + mul_flops) * batch_size * (2 if bidirectional else 1) * lstm_layers * time_dim
-
 
 def bmm_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
     """
