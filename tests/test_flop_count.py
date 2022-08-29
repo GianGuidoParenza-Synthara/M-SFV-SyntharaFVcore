@@ -396,6 +396,7 @@ class TestFlopCountAnalysis(unittest.TestCase):
             "Fully connected layer failed to pass the flop count test.",
         )
 
+
     def test_rnn(self) -> None:
         """
         Test a network with RNN layers.
@@ -515,6 +516,7 @@ class TestFlopCountAnalysis(unittest.TestCase):
             nonlinearity3,
             bidirectional3,
         )
+
 
     def test_lstm(self) -> None:
         """
@@ -638,6 +640,7 @@ class TestFlopCountAnalysis(unittest.TestCase):
             bidirectional3,
         )
 
+
     def test_gru(self) -> None:
         """
         Test a network with a GRU layer.
@@ -749,7 +752,8 @@ class TestFlopCountAnalysis(unittest.TestCase):
             lstm_layers3,
             bidirectional3,
         )
-
+        
+        
     def test_conv(self) -> None:
         """
         Test a network with a single convolution layer. The test cases are: 1)

@@ -188,10 +188,10 @@ class TestActivationCountAnalysis(unittest.TestCase):
                     f' and "bidirectional": {bidirectional}.'
                 )
 
-            self.assertDictEqual(
-                ac_dict,
-                gt_dict,
-                "LSTM layer failed to pass the flop count test.",
+            self.assertAlmostEqual(
+                ac_dict['lstm'],
+                gt_dict['lstm'],
+                msg="LSTM layer failed to pass the flop count test.",
             )
 
         # Test LSTM for 1 layer and 1 time step.

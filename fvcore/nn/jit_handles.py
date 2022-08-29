@@ -83,7 +83,7 @@ def generic_activation_jit(op_name: Optional[str] = None) -> Handle:
 
             *_, bias, lstm_layers, dropout, _, bidirectional, batch_first = get_values(inputs)
 
-            ac_count = (hidden_dim * (input_dim + hidden_dim + 1))
+            ac_count = 11 * proj_size + (0 if proj_size == hidden_dim else hidden_dim)
 
             return ac_count * batch_size * (2 if bidirectional else 1) * lstm_layers * time_dim
 
@@ -165,6 +165,22 @@ def gru_flop_jit(inputs: List[Any], outputs: List[Any]):
     # mul_flops = 0
 
     return (mm_flops + mul_flops) * batch_size * (2 if bidirectional else 1) * gru_layers * time_dim
+
+
+def lstm_flop_jit(inputs: List[Any], outputs: List[Any]):
+    """
+    Count flops for the aten::lstm operator.
+    """
+    time_dim, batch_size, input_dim = get_shape(inputs[0])
+    *_, proj_size = get_shape(outputs[1])
+    *_, hidden_dim = get_shape(outputs[2])
+
+    *_, _, lstm_layers, _, _, bidirectional, batch_first = get_values(inputs)
+
+    mm_flops = 4 * ((input_dim + hidden_dim) * proj_size) + (hidden_dim * proj_size if hidden_dim != proj_size else 0)
+    mul_flops = 3 * proj_size
+
+    return (mm_flops + mul_flops) * batch_size * (2 if bidirectional else 1) * lstm_layers * time_dim
 
 
 def bmm_flop_jit(inputs: List[Any], outputs: List[Any]) -> Number:
